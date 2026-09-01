@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FeeLedger</title>
+    <!--
+      GitHub Pages SPA redirect trick.
+      Redirects all 404s back to index.html with the path encoded as a query param,
+      which the main app reads and restores via history.replaceState.
+    -->
+    <script>
+      var l = window.location;
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        '/feeledger/' +
+        '?p=' + encodeURIComponent(l.pathname.replace('/feeledger', '') + l.search) +
+        (l.hash ? '&h=' + encodeURIComponent(l.hash) : '')
+      );
+    </script>
+  </head>
+  <body></body>
+</html>

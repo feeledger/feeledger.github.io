@@ -1,0 +1,373 @@
+/* ── Google Fonts: Sofia Sans (MarkForMC substitute) ── */
+@import url('https://fonts.googleapis.com/css2?family=Sofia+Sans:ital,wght@0,400;0,450;0,500;0,700;1,400&display=swap');
+
+@import "tailwindcss";
+
+/* ── Design tokens ── */
+@theme {
+  /* Colors */
+  --color-canvas:        #F3F0EE;
+  --color-lifted:        #FCFBFA;
+  --color-ink:           #141413;
+  --color-charcoal:      #262627;
+  --color-slate:         #696969;
+  --color-granite:       #555555;
+  --color-dust:          #D1CDC7;
+  --color-bone:          #F4F4F4;
+  --color-signal:        #CF4500;
+  --color-signal-light:  #F37338;
+  --color-clay:          #9A3A0A;
+  --color-link:          #3860BE;
+  --color-white:         #FFFFFF;
+  --color-ghost:         #E8E2DA;
+
+  /* Typography */
+  --font-sans: 'Sofia Sans', 'Arial', sans-serif;
+
+  /* Border radius scale — Mastercard system */
+  --radius-btn:      20px;
+  --radius-consent:  24px;
+  --radius-hero:     40px;
+  --radius-pill:     999px;
+  --radius-circle:   50%;
+
+  /* Shadows */
+  --shadow-nav:  0px 4px 24px 0px rgba(0,0,0,0.04);
+  --shadow-card: 0px 24px 48px 0px rgba(0,0,0,0.08);
+  --shadow-deep: 0px 70px 110px 0px rgba(0,0,0,0.25);
+
+  /* Spacing base */
+  --spacing-section-desktop: 96px;
+  --spacing-section-mobile:  48px;
+}
+
+/* ── Global base ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: var(--font-sans);
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100dvh;
+  background-color: var(--color-canvas);
+}
+
+/* ── Typography scale ── */
+.text-hero {
+  font-size: 64px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.text-section {
+  font-size: 36px;
+  font-weight: 500;
+  line-height: 44px;
+  letter-spacing: -0.02em;
+}
+
+.text-card-title {
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.text-eyebrow {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.text-body {
+  font-size: 16px;
+  font-weight: 450;
+  line-height: 1.4;
+}
+
+.text-nav {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.text-footer-link {
+  font-size: 14px;
+  font-weight: 450;
+  line-height: 1.43;
+}
+
+.text-footer-header {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Button system ── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--color-ink);
+  color: var(--color-canvas);
+  border: 1.5px solid var(--color-ink);
+  border-radius: var(--radius-btn);
+  padding: 10px 24px;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-primary:hover {
+  opacity: 0.88;
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--color-white);
+  color: var(--color-ink);
+  border: 1.5px solid var(--color-ink);
+  border-radius: var(--radius-btn);
+  padding: 10px 24px;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 450;
+  line-height: 20.8px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-secondary:hover {
+  opacity: 0.88;
+}
+
+/* Google sign-in pill */
+.btn-google {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background-color: var(--color-ink);
+  color: var(--color-canvas);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 14px 32px;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-google:hover {
+  opacity: 0.88;
+}
+
+.btn-google:active {
+  transform: scale(0.98);
+}
+
+/* ── Floating nav pill ── */
+.nav-pill {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background-color: var(--color-white);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-nav);
+  display: flex;
+  align-items: center;
+  padding: 12px 32px;
+  gap: 40px;
+  width: calc(100% - 48px);
+  max-width: 1200px;
+}
+
+/* ── Card / container ── */
+.card {
+  background-color: var(--color-lifted);
+  border-radius: var(--radius-hero);
+  padding: 32px;
+  box-shadow: var(--shadow-card);
+}
+
+.card-sm {
+  background-color: var(--color-lifted);
+  border-radius: var(--radius-btn);
+  padding: 24px;
+}
+
+/* ── Eyebrow with dot ── */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate);
+}
+
+.eyebrow::before {
+  content: '•';
+  color: var(--color-signal-light);
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ── Ghost watermark text ── */
+.ghost-headline {
+  color: var(--color-ghost);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Section spacing ── */
+.section {
+  padding-top: var(--spacing-section-desktop);
+  padding-bottom: var(--spacing-section-desktop);
+}
+
+@media (max-width: 767px) {
+  .section {
+    padding-top: var(--spacing-section-mobile);
+    padding-bottom: var(--spacing-section-mobile);
+  }
+
+  .text-hero {
+    font-size: 40px;
+  }
+
+  .text-section {
+    font-size: 28px;
+    line-height: 36px;
+  }
+
+  .nav-pill {
+    padding: 12px 20px;
+    gap: 0;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .text-hero {
+    font-size: 48px;
+  }
+}
+
+/* ── Stat cards ── */
+.stat-pill {
+  background-color: var(--color-white);
+  border-radius: var(--radius-pill);
+  padding: 8px 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ── Input base ── */
+.input-base {
+  width: 100%;
+  background-color: var(--color-white);
+  border: 1px solid rgba(20, 20, 19, 0.3);
+  border-radius: var(--radius-btn);
+  padding: 12px 20px;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 450;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input-base:focus {
+  border-color: var(--color-ink);
+}
+
+.input-base::placeholder {
+  color: var(--color-dust);
+}
+
+/* ── Footer ── */
+.footer {
+  background-color: var(--color-ink);
+  color: var(--color-white);
+}
+
+/* ── Sync status indicators ── */
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.sync-dot.synced   { background-color: #22c55e; }
+.sync-dot.pending  { background-color: var(--color-signal-light); }
+.sync-dot.error    { background-color: #ef4444; }
+.sync-dot.offline  { background-color: var(--color-slate); }
+
+/* ── Utility: orbital arc decoration ── */
+.orbital-arc {
+  position: absolute;
+  pointer-events: none;
+  stroke: var(--color-signal-light);
+  stroke-width: 1.2;
+  fill: none;
+  opacity: 0.6;
+}
+
+/* ── Focus visible ── */
+:focus-visible {
+  outline: 2px solid var(--color-signal-light);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Scrollbar (subtle) ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-dust);
+  border-radius: 3px;
+}
