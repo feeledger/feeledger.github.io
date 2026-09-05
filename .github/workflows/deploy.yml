@@ -30,10 +30,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
       - name: Build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
+
+      - name: Verify build output
+        run: |
+          echo "=== Build output ==="
+          ls -lh dist/
+          ls -lh dist/assets/ 2>/dev/null || true
+          echo "=== index.html head ==="
+          head -20 dist/index.html
+          echo "=== Service worker ==="
+          ls dist/sw.js dist/workbox-*.js 2>/dev/null && echo "SW present" || echo "No SW found"
+          echo "=== PWA manifest ==="
+          cat dist/manifest.webmanifest 2>/dev/null || echo "No manifest in dist"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
