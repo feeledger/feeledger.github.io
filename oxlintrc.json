@@ -1,0 +1,5 @@
+{
+  "rules": {
+    "react/set-state-in-effect": "off"
+  }
+}
