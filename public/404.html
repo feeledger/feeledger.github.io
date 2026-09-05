@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FeeLedger</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      GitHub Pages SPA redirect.
+      When GitHub Pages 404s on a deep route like /app/dashboard,
+      this page redirects to / and passes the original path as ?p=
+      The main index.html then reads and restores it via history.replaceState.
+    -->
+    <script>
+      var l = window.location;
+      var path = l.pathname + l.search + l.hash;
+      // Store in sessionStorage as backup
+      try { sessionStorage.setItem('spa_redirect', l.href); } catch(e) {}
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        '/?p=' + encodeURIComponent(path)
+      );
+    </script>
+  </head>
+  <body></body>
+</html>
