@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/logo-64.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/logo-192.png" />
+
+    <!-- Viewport -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Description -->
+    <meta name="description" content="FeeLedger — Free, open-source fee management for tutors and coaching centres. Your data stays in your Google Drive." />
+    <meta name="keywords" content="fee management, tuition fees, coaching centre, student fees, receipt, invoice, free" />
+
+    <!-- Theme -->
+    <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F3F0EE" media="(prefers-color-scheme: light)" />
+
+    <!-- PWA / mobile -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FeeLedger" />
+    <meta name="application-name" content="FeeLedger" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Open Graph / social -->
+    <meta property="og:title" content="FeeLedger — Fee management for tutors" />
+    <meta property="og:description" content="Collect fees. Know your students. Own your data. Free, open-source, data in your Google Drive." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://feeledger.github.io/" />
+    <meta property="og:image" content="https://feeledger.github.io/logo-512.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="FeeLedger" />
+    <meta name="twitter:description" content="Free fee management for tutors. Your data in your Google Drive." />
+
+    <!-- PWA manifest (vite-plugin-pwa injects this too, but keep explicit) -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Google Identity Services — async, non-blocking -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <!--
+      GitHub Pages SPA redirect restoration.
+      404.html encodes the original path as ?p=...
+      This script restores it before React mounts.
+    -->
+    <script>
+      (function() {
+        var redirect = sessionStorage.getItem('spa_redirect');
+        if (redirect) {
+          sessionStorage.removeItem('spa_redirect');
+          var url = new URL(redirect, location.origin);
+          history.replaceState(null, '', url.pathname + url.search + url.hash);
+        }
+        var query = window.location.search;
+        if (query) {
+          var params = new URLSearchParams(query);
+          var path = params.get('p');
+          if (path) {
+            history.replaceState(null, '', decodeURIComponent(path));
+          }
+        }
+      })();
+    </script>
+
+    <title>FeeLedger</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
