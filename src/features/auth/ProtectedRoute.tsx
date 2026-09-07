@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { settingsRepository } from '../../db/repositories/settingsRepository';
@@ -9,24 +9,26 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
   const [onboarding, setOnboarding] = useState<OnboardingState>('checking');
+  // Track how many times we've checked — avoids stale-state redirect loop
+  const checkCountRef = useRef(0);
 
   const checkOnboarding = useCallback(() => {
     if (!isAuthenticated) return;
+    checkCountRef.current += 1;
     settingsRepository.isOnboardingComplete().then(complete => {
       setOnboarding(complete ? 'done' : 'needed');
     });
   }, [isAuthenticated]);
 
+  // Re-check every time the location changes so that after the wizard saves
+  // and navigates to /app/dashboard, we re-read IndexedDB and get 'done'
   useEffect(() => {
     checkOnboarding();
-  }, [checkOnboarding]);
+  }, [checkOnboarding, location.pathname]);
 
-  // Re-check after Drive restore — data may have arrived from another device
+  // Re-check after Drive restore
   useEffect(() => {
-    const handler = () => {
-      // Small delay to let IndexedDB writes settle
-      setTimeout(checkOnboarding, 500);
-    };
+    const handler = () => setTimeout(checkOnboarding, 500);
     window.addEventListener('fl:drive-restored', handler);
     return () => window.removeEventListener('fl:drive-restored', handler);
   }, [checkOnboarding]);
@@ -35,8 +37,14 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated) return <Navigate to="/" state={{ from: location }} replace />;
   if (onboarding === 'checking') return <LoadingScreen message="Setting up…" />;
 
+  // Only redirect to onboarding if we're NOT already on an onboarding route
   if (onboarding === 'needed' && !location.pathname.startsWith('/onboarding')) {
     return <Navigate to="/onboarding" replace />;
+  }
+
+  // If onboarding is done but user somehow landed on /onboarding, send to dashboard
+  if (onboarding === 'done' && location.pathname.startsWith('/onboarding')) {
+    return <Navigate to="/app/dashboard" replace />;
   }
 
   return <>{children}</>;

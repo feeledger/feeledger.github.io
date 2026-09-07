@@ -272,7 +272,8 @@ export function BatchesPage() {
     refetch();
     setFormOpen(false);
     setEditingBatch(undefined);
-    setSelectedId(batch.id);
+    // Delay navigating to detail view until after modal closes
+    setTimeout(() => setSelectedId(batch.id), 50);
   };
 
   const handleArchive = async () => {
@@ -424,7 +425,7 @@ export function BatchesPage() {
 
       {/* Create form */}
       <BatchForm
-        open={formOpen && !selectedBatch}
+        open={formOpen}
         batch={editingBatch}
         onSaved={handleSaved}
         onClose={() => { setFormOpen(false); setEditingBatch(undefined); }}

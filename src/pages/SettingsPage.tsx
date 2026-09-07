@@ -31,18 +31,28 @@ function BusinessTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Sync form when settings prop changes (controlled reset on external update)
-  useEffect(() => { setForm({ ...b }); }, [b]);
+  // Sync form from settings — but skip if we just saved (avoid wiping the saved tick)
+  const justSavedRef = React.useRef(false);
+  useEffect(() => {
+    if (justSavedRef.current) return;
+    setForm({ ...b });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.business.businessName, settings.business.phone, settings.business.email,
+      settings.business.address, settings.business.gstin, settings.business.website]);
 
   const set = (key: string, val: string) => setForm(f => ({ ...f, [key]: val }));
+
+  const savedRef = React.useRef(false);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await onPatch({ business: { ...form } });
-      // Note: onPatch caller handles enqueuePush via settings change
+      savedRef.current = true;
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => { savedRef.current = false; setSaved(false); }, 3000);
+    } catch {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -129,9 +139,10 @@ function ReceiptTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p:
     setSaving(true);
     try {
       await onPatch({ receiptNumbering: { ...rn, prefix, includeYear, includeMonth, padding } });
-      // Note: onPatch caller handles enqueuePush via settings change
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -203,9 +214,10 @@ function PaymentModesTab({ settings, onPatch }: { settings: AppSettings; onPatch
     setSaving(true);
     try {
       await onPatch({ paymentModes: modes });
-      // Note: onPatch caller handles enqueuePush via settings change
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -481,16 +493,22 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
   const [newRateName, setNewRateName] = useState('');
   const [newRateValue, setNewRateValue] = useState('');
 
+  const taxSavedRef = React.useRef(false);
   React.useEffect(() => {
+    if (taxSavedRef.current) return;
     setTax(settings.taxSettings ?? { enabled: false, rates: [], amountIsInclusive: false });
-  }, [settings]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.taxSettings?.enabled]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await onPatch({ taxSettings: tax });
+      taxSavedRef.current = true;
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => { taxSavedRef.current = false; setSaved(false); }, 3000);
+    } catch {
+      alert('Failed to save tax settings. Please try again.');
     } finally { setSaving(false); }
   };
 
