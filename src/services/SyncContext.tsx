@@ -41,7 +41,7 @@ function retryDelay(attempt: number): number {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
-  const { accessToken, hasDriveAccess, isAuthenticated } = useAuth();
+  const { accessToken, hasDriveAccess, isAuthenticated, requestDriveAccess } = useAuth();
 
   const [syncState, setSyncState]       = useState<SyncState>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -210,11 +210,19 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   const syncNow = useCallback(() => push(), [push]);
 
-  // ── Initial pull on sign-in ───────────────────────────────────────────────────
+  // ── Auto-request Drive access then pull on sign-in ───────────────────────────
 
   useEffect(() => {
-    if (!isAuthenticated || !hasDriveAccess || !accessToken) return;
-    pull();
+    if (!isAuthenticated) return;
+    if (hasDriveAccess && accessToken) {
+      // Already have Drive access — pull immediately
+      pull();
+    } else if (isAuthenticated && !hasDriveAccess) {
+      // Request Drive access automatically (non-blocking — user may need to consent)
+      requestDriveAccess().then(granted => {
+        if (granted) pull();
+      }).catch(console.error);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, hasDriveAccess]);
 

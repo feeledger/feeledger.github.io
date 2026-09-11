@@ -194,21 +194,61 @@ export async function generateReceiptPDF(data: ReceiptData): Promise<jsPDF> {
   doc.line(margin, y, pageW - margin, y);
   y += 4;
 
+  // ── Tax calculation ──────────────────────────────────────────────────────────
+  const taxSettings = settings.taxSettings;
+  const activeTaxRate = taxSettings?.enabled && taxSettings.rates.length > 0
+    ? (taxSettings.defaultRateId
+        ? taxSettings.rates.find(r => r.id === taxSettings.defaultRateId)
+        : taxSettings.rates.find(r => r.enabled))
+    : null;
+
+  let baseAmount = payment.amount;
+  let taxAmount = 0;
+  let totalAmount = payment.amount;
+
+  if (activeTaxRate) {
+    if (taxSettings!.amountIsInclusive) {
+      // Amount includes tax — extract tax
+      taxAmount = payment.amount - (payment.amount / (1 + activeTaxRate.rate / 100));
+      baseAmount = payment.amount - taxAmount;
+    } else {
+      // Amount excludes tax — add tax
+      taxAmount = payment.amount * (activeTaxRate.rate / 100);
+      totalAmount = payment.amount + taxAmount;
+    }
+  }
+
   // ── Amount box ───────────────────────────────────────────────────────────────
+  const boxH = activeTaxRate ? 32 : 18;
   doc.setFillColor(...canvasRGB);
-  doc.roundedRect(margin, y, contentW, 18, 3, 3, 'F');
+  doc.roundedRect(margin, y, contentW, boxH, 3, 3, 'F');
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...slateRGB);
-  doc.text('AMOUNT PAID', margin + 5, y + 7);
+  if (activeTaxRate) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...slateRGB);
+    doc.text('SUBTOTAL', margin + 5, y + 7);
+    doc.text(formatAmount(baseAmount, currency), pageW - margin - 5, y + 7, { align: 'right' });
+    doc.text(`${activeTaxRate.name} (${activeTaxRate.rate}%)`, margin + 5, y + 14);
+    doc.text(formatAmount(taxAmount, currency), pageW - margin - 5, y + 14, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...inkRGB);
+    doc.text('TOTAL PAID', margin + 5, y + 23);
+    doc.setFontSize(14);
+    doc.text(formatAmount(totalAmount, currency), pageW - margin - 5, y + 25, { align: 'right' });
+  } else {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...slateRGB);
+    doc.text('AMOUNT PAID', margin + 5, y + 7);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(...inkRGB);
+    doc.text(formatAmount(payment.amount, currency), pageW - margin - 5, y + 14, { align: 'right' });
+  }
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.setTextColor(...inkRGB);
-  doc.text(formatAmount(payment.amount, currency), pageW - margin - 5, y + 12, { align: 'right' });
-
-  y += 24;
+  y += boxH + 6;
 
   // ── Footer ───────────────────────────────────────────────────────────────────
   const footerY = pageH - 14;

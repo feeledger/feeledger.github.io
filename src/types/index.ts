@@ -99,7 +99,7 @@ export interface Subject {
 export interface Batch {
   id: string;
   name: string;
-  academicYearId: string;
+  academicYearId?: string;
   description?: string;
   startDate?: string;
   endDate?: string;

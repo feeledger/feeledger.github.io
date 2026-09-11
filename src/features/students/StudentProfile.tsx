@@ -67,12 +67,39 @@ export function StudentProfile({ studentId, onEdit, onBack }: StudentProfileProp
 
   const handleWhatsApp = () => {
     if (!whatsappNum) return;
-    const feeAmount = String(student.values['fee_amount'] ?? '');
+    const feeAmount   = Number(student.values['fee_amount'] ?? 0);
+    const feeType     = String(student.values['fee_type'] ?? 'per_frequency');
+    const feeFreq     = String(student.values['fee_frequency'] ?? '');
+    const dueDay      = String(student.values['fee_due_date'] ?? '');
+
+    // Build frequency label
+    const freqLabels: Record<string, string> = {
+      monthly: 'monthly', quarterly: 'quarterly', halfYearly: 'half-yearly',
+      yearly: 'annually', oneTime: 'one-time', instalment2: 'in 2 instalments',
+      instalment3: 'in 3 instalments', custom: 'as per agreed schedule',
+    };
+    const freqLabel = freqLabels[feeFreq] ?? feeFreq;
+
+    // Build amount description based on fee_type
+    let amountDesc = '';
+    if (feeAmount > 0) {
+      if (feeType === 'total') {
+        amountDesc = `${formatAmount(feeAmount, currency)} (total course fees, payable ${freqLabel})`;
+      } else {
+        amountDesc = `${formatAmount(feeAmount, currency)} ${freqLabel}`;
+      }
+    }
+
+    // Build due date string
+    const dueDateStr = dueDay
+      ? `the ${dueDay}${['1','21','31'].includes(dueDay) ? 'st' : ['2','22'].includes(dueDay) ? 'nd' : ['3','23'].includes(dueDay) ? 'rd' : 'th'} of every month`
+      : '—';
+
     const msg = waTemplate
       .replace(/{{name}}/g, studentName)
-      .replace(/{{amount}}/g, feeAmount ? formatAmount(Number(feeAmount), currency) : '—')
+      .replace(/{{amount}}/g, amountDesc || '—')
       .replace(/{{period}}/g, new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' }))
-      .replace(/{{due_date}}/g, String(student.values['fee_due_date'] ?? '—'))
+      .replace(/{{due_date}}/g, dueDateStr)
       .replace(/{{business_name}}/g, businessName);
 
     const phone = whatsappNum.replace(/\D/g, '');

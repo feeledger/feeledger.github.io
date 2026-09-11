@@ -463,9 +463,10 @@ export function OnboardingWizard() {
       }
 
       setStep(3);
+      // Signal to SyncContext that data is ready to push
+      window.dispatchEvent(new CustomEvent('fl:onboarding-complete'));
     } catch (err) {
       console.error('Onboarding save error:', err);
-      // Still advance — user can fix in settings
       setStep(3);
     } finally {
       setSaving(false);

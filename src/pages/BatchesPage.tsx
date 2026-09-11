@@ -253,8 +253,8 @@ export function BatchesPage() {
     [selectedId, batches]
   );
 
-  const getAcademicYearName = (id: string) =>
-    academicYears?.find(ay => ay.id === id)?.name ?? '';
+  const getAcademicYearName = (id?: string) =>
+    id ? (academicYears?.find(ay => ay.id === id)?.name ?? '') : '';
 
   const getSubjectNames = (ids: string[]) =>
     ids.map(id => subjects?.find(s => s.id === id)?.name ?? '').filter(Boolean);

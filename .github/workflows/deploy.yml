@@ -51,7 +51,7 @@ jobs:
           echo "=== Service worker ==="
           ls dist/sw.js dist/workbox-*.js 2>/dev/null && echo "SW present" || echo "No SW found"
           echo "=== PWA manifest ==="
-          cat dist/manifest.webmanifest 2>/dev/null || echo "No manifest in dist"
+          cat dist/manifest.json 2>/dev/null || echo "No manifest in dist"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

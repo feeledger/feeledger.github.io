@@ -76,7 +76,7 @@ export function BatchForm({ open, batch, onSaved, onClose }: BatchFormProps) {
     try {
       if (batch) {
         await batchRepository.update(batch.id, {
-          name: name.trim(), academicYearId, description,
+          name: name.trim(), academicYearId: academicYearId || undefined, description,
           startDate: startDate || undefined, endDate: endDate || undefined,
           schedule: schedule || undefined, subjectIds: selectedSubjectIds,
         });
@@ -84,7 +84,7 @@ export function BatchForm({ open, batch, onSaved, onClose }: BatchFormProps) {
         if (updated) { enqueuePush(); onSaved(updated); }
       } else {
         const created = await batchRepository.create({
-          name: name.trim(), academicYearId, description,
+          name: name.trim(), academicYearId: academicYearId || undefined, description,
           startDate: startDate || undefined, endDate: endDate || undefined,
           schedule: schedule || undefined, subjectIds: selectedSubjectIds,
           status: 'active',
@@ -92,8 +92,9 @@ export function BatchForm({ open, batch, onSaved, onClose }: BatchFormProps) {
         enqueuePush();
         onSaved(created);
       }
-    } catch {
-      setError('Failed to save. Please try again.');
+    } catch (err) {
+      console.error('[BatchForm] save error:', err);
+      setError('Failed to save: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSaving(false);
     }

@@ -31,27 +31,24 @@ function BusinessTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Sync form from settings — but skip if we just saved (avoid wiping the saved tick)
-  const justSavedRef = React.useRef(false);
+  const savedRef = React.useRef(false);
   useEffect(() => {
-    if (justSavedRef.current) return;
+    if (savedRef.current) return;
     setForm({ ...b });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.business.businessName, settings.business.phone, settings.business.email,
-      settings.business.address, settings.business.gstin, settings.business.website]);
+  }, [settings]);
 
   const set = (key: string, val: string) => setForm(f => ({ ...f, [key]: val }));
 
-  const savedRef = React.useRef(false);
-
   const handleSave = async () => {
     setSaving(true);
+    savedRef.current = true;
     try {
       await onPatch({ business: { ...form } });
-      savedRef.current = true;
       setSaved(true);
       setTimeout(() => { savedRef.current = false; setSaved(false); }, 3000);
     } catch {
+      savedRef.current = false;
       alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
@@ -120,13 +117,15 @@ function ReceiptTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p:
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  const receiptSavedRef = React.useRef(false);
   useEffect(() => {
+    if (receiptSavedRef.current) return;
     setPrefix(rn.prefix);
     setIncludeYear(rn.includeYear);
     setIncludeMonth(rn.includeMonth);
     setPadding(rn.padding);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rn.prefix, rn.includeYear, rn.includeMonth, rn.padding]);
+  }, [settings]);
 
   const preview = [
     prefix,
@@ -137,11 +136,13 @@ function ReceiptTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p:
 
   const handleSave = async () => {
     setSaving(true);
+    receiptSavedRef.current = true;
     try {
       await onPatch({ receiptNumbering: { ...rn, prefix, includeYear, includeMonth, padding } });
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => { receiptSavedRef.current = false; setSaved(false); }, 3000);
     } catch {
+      receiptSavedRef.current = false;
       alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
@@ -198,7 +199,12 @@ function PaymentModesTab({ settings, onPatch }: { settings: AppSettings; onPatch
   const [saved, setSaved] = useState(false);
   const [newLabel, setNewLabel] = useState('');
 
-  useEffect(() => { setModes(settings.paymentModes); }, [settings.paymentModes]);
+  const modesSavedRef = React.useRef(false);
+  useEffect(() => {
+    if (modesSavedRef.current) return;
+    setModes(settings.paymentModes);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
 
   const toggle = (id: string, enabled: boolean) =>
     setModes(m => m.map(p => p.id === id ? { ...p, enabled } : p));
@@ -212,11 +218,13 @@ function PaymentModesTab({ settings, onPatch }: { settings: AppSettings; onPatch
 
   const handleSave = async () => {
     setSaving(true);
+    modesSavedRef.current = true;
     try {
       await onPatch({ paymentModes: modes });
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => { modesSavedRef.current = false; setSaved(false); }, 3000);
     } catch {
+      modesSavedRef.current = false;
       alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
@@ -268,7 +276,7 @@ function PaymentModesTab({ settings, onPatch }: { settings: AppSettings; onPatch
 
 const DEFAULT_TEMPLATE = `Hi {{name}},
 
-This is a reminder that your fee of ₹{{amount}} for {{period}} is due on {{due_date}}.
+This is a reminder that your fee of {{amount}} for {{period}} is due on {{due_date}}.
 
 Kindly make the payment at your earliest convenience.
 
@@ -277,7 +285,7 @@ Thank you,
 
 const PLACEHOLDERS = [
   { key: '{{name}}',          desc: 'Member name' },
-  { key: '{{amount}}',        desc: 'Amount due' },
+  { key: '{{amount}}',        desc: 'Fee amount with frequency (e.g. ₹4,500 monthly)' },
   { key: '{{period}}',        desc: 'Period (e.g. September 2026)' },
   { key: '{{due_date}}',      desc: 'Due date' },
   { key: '{{business_name}}', desc: 'Your business name' },
@@ -498,16 +506,17 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
     if (taxSavedRef.current) return;
     setTax(settings.taxSettings ?? { enabled: false, rates: [], amountIsInclusive: false });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.taxSettings?.enabled]);
+  }, [settings]);
 
   const handleSave = async () => {
     setSaving(true);
+    taxSavedRef.current = true;
     try {
       await onPatch({ taxSettings: tax });
-      taxSavedRef.current = true;
       setSaved(true);
       setTimeout(() => { taxSavedRef.current = false; setSaved(false); }, 3000);
     } catch {
+      taxSavedRef.current = false;
       alert('Failed to save tax settings. Please try again.');
     } finally { setSaving(false); }
   };

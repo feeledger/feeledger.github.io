@@ -126,7 +126,7 @@ export const batchRepository = {
 
   async listByAcademicYear(academicYearId: string): Promise<Batch[]> {
     return getDB().batches
-      .where('academicYearId').equals(academicYearId)
+      .filter(b => b.academicYearId === academicYearId)
       .sortBy('name');
   },
 

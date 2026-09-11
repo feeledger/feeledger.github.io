@@ -151,6 +151,18 @@ export function getDefaultStudentFields(): StudentFieldDefinition[] {
       createdAt: ts, updatedAt: ts,
     },
     {
+      id: 'fee_type', label: 'Fee Amount Type', type: 'select',
+      required: false, searchable: false, enabled: true,
+      showInList: false, showOnReceipt: false,
+      category: 'tuition', order: 33,
+      options: [
+        { id: 'per_frequency', label: 'Per frequency (monthly/term etc.)', value: 'per_frequency' },
+        { id: 'total',         label: 'Total fees (lifetime/course)',       value: 'total' },
+      ],
+      defaultValue: 'per_frequency',
+      createdAt: ts, updatedAt: ts,
+    },
+    {
       id: 'fee_due_date', label: 'Fee Due Date (Day of Month)', type: 'number',
       required: false, searchable: false, enabled: true,
       showInList: false, showOnReceipt: false,

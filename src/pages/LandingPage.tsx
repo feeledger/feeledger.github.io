@@ -44,6 +44,26 @@ export function LandingPage() {
   const navigate = useNavigate();
   const [signingIn, setSigningIn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [installEvent, setInstallEvent] = useState<Event | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsInstalled(true);
+      return;
+    }
+    const handler = (e: Event) => { e.preventDefault(); setInstallEvent(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installEvent) return;
+    const evt = installEvent as Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+    await evt.prompt();
+    const result = await evt.userChoice;
+    if (result.outcome === 'accepted') { setInstallEvent(null); setIsInstalled(true); }
+  };
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) navigate('/app/dashboard', { replace: true });
@@ -275,6 +295,50 @@ export function LandingPage() {
           ))}
         </div>
       </section>
+
+      {/* ══ PWA Install banner ══ */}
+      {(installEvent || isInstalled) && (
+        <section style={{
+          padding: '0 clamp(16px, 4vw, 48px)',
+          maxWidth: 1200, margin: '0 auto 0',
+        }}>
+          <div style={{
+            background: 'var(--color-ink)',
+            borderRadius: 20,
+            padding: '20px 28px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            flexWrap: 'wrap', gap: 16,
+            margin: '0 0 0',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <img src="/logo-64.png" alt="FeeLedger" width={40} height={40} style={{ borderRadius: 10 }} />
+              <div>
+                <p style={{ color: 'var(--color-canvas)', fontWeight: 700, fontSize: 15 }}>
+                  {isInstalled ? '✓ FeeLedger is installed' : 'Install FeeLedger as an app'}
+                </p>
+                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 2 }}>
+                  {isInstalled
+                    ? 'Open it from your home screen anytime, even offline.'
+                    : 'Add to home screen for instant access, works offline.'}
+                </p>
+              </div>
+            </div>
+            {!isInstalled && installEvent && (
+              <button
+                onClick={handleInstall}
+                style={{
+                  background: 'var(--color-canvas)', border: 'none', borderRadius: 12,
+                  padding: '10px 24px', cursor: 'pointer',
+                  color: 'var(--color-ink)', fontSize: 14, fontWeight: 700,
+                  fontFamily: 'var(--font-sans)', flexShrink: 0,
+                }}
+              >
+                Install App
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ══ Features — cards ══ */}
       <section id="features" className="section" style={{ paddingLeft: 'clamp(16px, 4vw, 48px)', paddingRight: 'clamp(16px, 4vw, 48px)' }}>
