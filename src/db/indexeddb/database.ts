@@ -121,6 +121,16 @@ export class FeeLedgerDB extends Dexie {
       driveMeta:
         'id',
     });
+
+    // v2: add missing 'name' index on batches store.
+    // batchRepository.listAll() needs to sort by name — the original v1
+    // schema omitted this index, which caused a SchemaError on every
+    // batch list refresh (the actual cause of "batches never appear").
+    // Dexie upgrades existing databases in place; no data is lost.
+    this.version(2).stores({
+      batches:
+        'id, name, academicYearId, status, createdAt, updatedAt',
+    });
   }
 }
 

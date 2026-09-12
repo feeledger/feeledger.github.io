@@ -131,7 +131,11 @@ export const batchRepository = {
   },
 
   async listAll(): Promise<Batch[]> {
-    return getDB().batches.orderBy('name').toArray();
+    // NOTE: 'name' is not an indexed field on the batches store,
+    // so we must fetch and sort in JS rather than use .orderBy('name')
+    // (orderBy requires an index and throws SchemaError otherwise).
+    const all = await getDB().batches.toArray();
+    return all.sort((a, b) => a.name.localeCompare(b.name));
   },
 
   async update(id: string, changes: Partial<Batch>): Promise<void> {
