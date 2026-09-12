@@ -194,49 +194,42 @@ export async function generateReceiptPDF(data: ReceiptData): Promise<jsPDF> {
   doc.line(margin, y, pageW - margin, y);
   y += 4;
 
-  // ── Tax calculation ──────────────────────────────────────────────────────────
-  const taxSettings = settings.taxSettings;
-  const activeTaxRate = taxSettings?.enabled && taxSettings.rates.length > 0
-    ? (taxSettings.defaultRateId
-        ? taxSettings.rates.find(r => r.id === taxSettings.defaultRateId)
-        : taxSettings.rates.find(r => r.enabled))
-    : null;
-
-  let baseAmount = payment.amount;
-  let taxAmount = 0;
-  let totalAmount = payment.amount;
-
-  if (activeTaxRate) {
-    if (taxSettings!.amountIsInclusive) {
-      // Amount includes tax — extract tax
-      taxAmount = payment.amount - (payment.amount / (1 + activeTaxRate.rate / 100));
-      baseAmount = payment.amount - taxAmount;
-    } else {
-      // Amount excludes tax — add tax
-      taxAmount = payment.amount * (activeTaxRate.rate / 100);
-      totalAmount = payment.amount + taxAmount;
-    }
-  }
+  // ── Tax breakdown — read from the payment's own snapshot, never guessed ──────
+  // This is what was actually applied at the time of payment, so historical
+  // receipts stay correct even if tax rates are edited/removed later.
+  const taxLines = payment.taxLines ?? [];
+  const hasTax = taxLines.length > 0;
+  const baseAmount = hasTax ? (payment.baseAmount ?? payment.amount) : payment.amount;
+  const totalAmount = payment.amount; // payment.amount is always the total collected
 
   // ── Amount box ───────────────────────────────────────────────────────────────
-  const boxH = activeTaxRate ? 32 : 18;
+  const lineRowH = 6;
+  const boxH = hasTax ? (14 + taxLines.length * lineRowH + 12) : 18;
   doc.setFillColor(...canvasRGB);
   doc.roundedRect(margin, y, contentW, boxH, 3, 3, 'F');
 
-  if (activeTaxRate) {
+  if (hasTax) {
+    let ty = y + 7;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(...slateRGB);
-    doc.text('SUBTOTAL', margin + 5, y + 7);
-    doc.text(formatAmount(baseAmount, currency), pageW - margin - 5, y + 7, { align: 'right' });
-    doc.text(`${activeTaxRate.name} (${activeTaxRate.rate}%)`, margin + 5, y + 14);
-    doc.text(formatAmount(taxAmount, currency), pageW - margin - 5, y + 14, { align: 'right' });
+    doc.text('SUBTOTAL', margin + 5, ty);
+    doc.text(formatAmount(baseAmount, currency), pageW - margin - 5, ty, { align: 'right' });
+    ty += lineRowH;
+
+    for (const line of taxLines) {
+      doc.text(`${line.name} (${line.rate}%)`, margin + 5, ty);
+      doc.text(formatAmount(line.amount, currency), pageW - margin - 5, ty, { align: 'right' });
+      ty += lineRowH;
+    }
+
+    ty += 2;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(...inkRGB);
-    doc.text('TOTAL PAID', margin + 5, y + 23);
+    doc.text('TOTAL PAID', margin + 5, ty);
     doc.setFontSize(14);
-    doc.text(formatAmount(totalAmount, currency), pageW - margin - 5, y + 25, { align: 'right' });
+    doc.text(formatAmount(totalAmount, currency), pageW - margin - 5, ty + 2, { align: 'right' });
   } else {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);

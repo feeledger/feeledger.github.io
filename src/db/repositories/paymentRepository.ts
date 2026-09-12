@@ -1,9 +1,10 @@
 import { getDB, generateId, now } from '../indexeddb/database';
-import type { Payment } from '../../types';
+import type { Payment, PaymentTaxLine } from '../../types';
 
 export interface CreatePaymentInput {
   studentId: string;
   batchId?: string;
+  /** Total amount actually collected (base + tax, if any). */
   amount: number;
   currency?: string;
   paymentMode: string;
@@ -11,6 +12,14 @@ export interface CreatePaymentInput {
   purpose?: string;
   notes?: string;
   customValues?: Record<string, unknown>;
+  /** Pre-tax amount — only pass when tax was applied. */
+  baseAmount?: number;
+  /** Total tax amount — only pass when tax was applied. */
+  taxAmount?: number;
+  /** Per-rate breakdown — only pass when tax was applied. */
+  taxLines?: PaymentTaxLine[];
+  /** Whether the entered amount was treated as tax-inclusive. */
+  taxInclusive?: boolean;
 }
 
 export interface PaymentFilters {
@@ -37,6 +46,10 @@ export const paymentRepository = {
       purpose: input.purpose,
       notes: input.notes,
       customValues: input.customValues,
+      baseAmount: input.baseAmount,
+      taxAmount: input.taxAmount,
+      taxLines: input.taxLines,
+      taxInclusive: input.taxInclusive,
       createdAt: ts,
       updatedAt: ts,
     };

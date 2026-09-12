@@ -139,10 +139,22 @@ export interface PaymentMode {
 }
 
 // ── Payment ───────────────────────────────────────────────────────────────
+
+// Snapshot of a single tax line applied to a payment at the time it was recorded.
+// Stored on the Payment itself (not derived from live Settings) so that
+// editing or deleting a tax rate later never changes historical receipts.
+export interface PaymentTaxLine {
+  taxRateId: string;
+  name: string;    // snapshotted name, e.g. "CGST"
+  rate: number;    // snapshotted percentage, e.g. 9
+  amount: number;  // computed tax amount for this line, in the payment's currency
+}
+
 export interface Payment {
   id: string;
   studentId: string;
   batchId?: string;
+  /** Always the TOTAL amount actually collected (base + tax, if any). */
   amount: number;
   currency: string;
   paymentMode: string;
@@ -151,6 +163,14 @@ export interface Payment {
   notes?: string;
   customValues?: Record<string, unknown>;
   receiptId?: string;
+  /** Pre-tax amount. Only present when tax was applied to this payment. */
+  baseAmount?: number;
+  /** Total tax amount (sum of taxLines). Only present when tax was applied. */
+  taxAmount?: number;
+  /** Per-rate breakdown, snapshotted at payment time. Only present when tax was applied. */
+  taxLines?: PaymentTaxLine[];
+  /** Whether the entered amount was treated as tax-inclusive at the time of this payment. */
+  taxInclusive?: boolean;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string;
@@ -282,7 +302,8 @@ export interface TaxRate {
 export interface TaxSettings {
   enabled: boolean;
   rates: TaxRate[];
-  defaultRateId?: string;
+  /** Multiple tax rates can be marked default and applied together (e.g. CGST + SGST). */
+  defaultRateIds: string[];
   amountIsInclusive: boolean; // true = amount entered includes tax
 }
 

@@ -138,19 +138,40 @@ export function ReceiptPreview({ data, compact = false }: ReceiptPreviewProps) {
           ))}
         </div>
 
-        {/* Amount */}
-        <div style={{
-          background: '#F3F0EE', borderRadius: 10,
-          padding: '12px 16px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#696969', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>
-            Amount Paid
-          </p>
-          <p style={{ fontSize: compact ? 20 : 24, fontWeight: 700, color: '#141413', margin: 0, letterSpacing: '-0.02em' }}>
-            {formatAmount(payment.amount, currency)}
-          </p>
-        </div>
+        {/* Amount + tax breakdown */}
+        {(() => {
+          const taxLines = payment.taxLines ?? [];
+          const hasTax = taxLines.length > 0;
+          const baseAmount = hasTax ? (payment.baseAmount ?? payment.amount) : payment.amount;
+
+          return (
+            <div style={{ background: '#F3F0EE', borderRadius: 10, padding: '12px 16px' }}>
+              {hasTax && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                    <p style={{ fontSize: 11, color: '#696969', margin: 0 }}>Subtotal</p>
+                    <p style={{ fontSize: 13, color: '#141413', margin: 0 }}>{formatAmount(baseAmount, currency)}</p>
+                  </div>
+                  {taxLines.map(line => (
+                    <div key={line.taxRateId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                      <p style={{ fontSize: 11, color: '#696969', margin: 0 }}>{line.name} ({line.rate}%)</p>
+                      <p style={{ fontSize: 13, color: '#141413', margin: 0 }}>{formatAmount(line.amount, currency)}</p>
+                    </div>
+                  ))}
+                  <div style={{ borderTop: '1px solid #D1CDC7', margin: '8px 0' }} />
+                </>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#696969', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>
+                  {hasTax ? 'Total Paid' : 'Amount Paid'}
+                </p>
+                <p style={{ fontSize: compact ? 20 : 24, fontWeight: 700, color: '#141413', margin: 0, letterSpacing: '-0.02em' }}>
+                  {formatAmount(payment.amount, currency)}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Footer */}
         <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid #F0EDE9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

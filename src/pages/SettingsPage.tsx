@@ -7,6 +7,7 @@ import { SyncStatusBar } from '../components/SyncStatusBar';
 import { FieldBuilder } from '../features/settings/FieldBuilder';
 import { PageHeader, SectionCard, FormRow, Spinner, Toggle } from '../components/ui/index';
 import type { AppSettings, PaymentMode } from '../types';
+import { normalizeDefaultRateIds } from '../utils/tax';
 
 // ── Tab system ────────────────────────────────────────────────────────────────
 
@@ -494,8 +495,11 @@ function SyncTab() {
 // ── Tax Tab ───────────────────────────────────────────────────────────────────
 
 function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Partial<AppSettings>) => Promise<void> }) {
-  const defaultTax = settings.taxSettings ?? { enabled: false, rates: [], amountIsInclusive: false };
-  const [tax, setTax] = useState(defaultTax);
+  const normaliseTax = (t: AppSettings['taxSettings']) => {
+    if (!t) return { enabled: false, rates: [], defaultRateIds: [], amountIsInclusive: false };
+    return { ...t, defaultRateIds: normalizeDefaultRateIds(t) };
+  };
+  const [tax, setTax] = useState(() => normaliseTax(settings.taxSettings));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [newRateName, setNewRateName] = useState('');
@@ -504,7 +508,7 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
   const taxSavedRef = React.useRef(false);
   React.useEffect(() => {
     if (taxSavedRef.current) return;
-    setTax(settings.taxSettings ?? { enabled: false, rates: [], amountIsInclusive: false });
+    setTax(normaliseTax(settings.taxSettings));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
@@ -535,13 +539,28 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
     setNewRateValue('');
   };
 
-  const removeRate = (id: string) => setTax(t => ({ ...t, rates: t.rates.filter(r => r.id !== id) }));
+  const removeRate = (id: string) => setTax(t => ({
+    ...t,
+    rates: t.rates.filter(r => r.id !== id),
+    defaultRateIds: t.defaultRateIds.filter(rid => rid !== id),
+  }));
+
+  const toggleDefault = (id: string) => setTax(t => ({
+    ...t,
+    defaultRateIds: t.defaultRateIds.includes(id)
+      ? t.defaultRateIds.filter(rid => rid !== id)
+      : [...t.defaultRateIds, id],
+  }));
 
   const IS: React.CSSProperties = {
     background: 'var(--color-white)', border: '1px solid rgba(20,20,19,0.22)',
     borderRadius: 10, padding: '9px 12px', fontFamily: 'var(--font-sans)',
     fontSize: 14, color: 'var(--color-ink)', outline: 'none', boxSizing: 'border-box' as const,
   };
+
+  const totalDefaultPct = tax.rates
+    .filter(r => tax.defaultRateIds.includes(r.id))
+    .reduce((s, r) => s + r.rate, 0);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -554,11 +573,11 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
 
           {tax.enabled && (
             <>
-              <FormRow label="Amount Entry" hint="How the amount is entered by default">
+              <FormRow label="Amount Entry" hint="Whether the amount typed at payment time already includes tax, or tax is added on top">
                 <div style={{ display: 'flex', gap: 10 }}>
                   {[
-                    { label: 'Exclusive of tax', value: false },
-                    { label: 'Inclusive of tax', value: true },
+                    { label: 'Exclusive — tax added on top', value: false },
+                    { label: 'Inclusive — amount already includes tax', value: true },
                   ].map(opt => (
                     <button key={String(opt.value)} type="button"
                       onClick={() => setTax(t => ({ ...t, amountIsInclusive: opt.value }))}
@@ -575,7 +594,7 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
                 </div>
               </FormRow>
 
-              <FormRow label="Tax Rates" hint="Add the tax rates you use. Users can pick from these when recording a payment.">
+              <FormRow label="Tax Rates" hint="Add the tax rates you use, e.g. CGST 9%, SGST 9%, or a single GST 18%">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--color-dust)', borderRadius: 12, overflow: 'hidden', marginBottom: 8 }}>
                   {tax.rates.length === 0 && (
                     <p style={{ padding: '12px 16px', fontSize: 13, color: 'var(--color-dust)' }}>No tax rates added yet.</p>
@@ -600,7 +619,7 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input style={{ ...IS, flex: 2 }} value={newRateName} onChange={e => setNewRateName(e.target.value)}
-                    placeholder="Name (e.g. GST, IGST)" />
+                    placeholder="Name (e.g. CGST, SGST, GST)" />
                   <input style={{ ...IS, flex: 1 }} type="number" value={newRateValue} onChange={e => setNewRateValue(e.target.value)}
                     placeholder="%" min="0" max="100" />
                   <button onClick={addRate} className="btn-primary" style={{ padding: '0 16px', fontSize: 14, whiteSpace: 'nowrap' }}>
@@ -610,13 +629,39 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
               </FormRow>
 
               {tax.rates.length > 0 && (
-                <FormRow label="Default Tax Rate">
-                  <select style={{ ...IS, width: '100%', cursor: 'pointer' }}
-                    value={tax.defaultRateId ?? ''}
-                    onChange={e => setTax(t => ({ ...t, defaultRateId: e.target.value || undefined }))}>
-                    <option value="">— No default —</option>
-                    {tax.rates.map(r => <option key={r.id} value={r.id}>{r.name} ({r.rate}%)</option>)}
-                  </select>
+                <FormRow
+                  label="Default Tax Rates"
+                  hint="Select one or more rates to apply automatically to new payments (e.g. tick both CGST and SGST). Each appears as a separate line on the receipt. You can still change this per payment."
+                >
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {tax.rates.map(rate => {
+                      const active = tax.defaultRateIds.includes(rate.id);
+                      return (
+                        <button key={rate.id} type="button" onClick={() => toggleDefault(rate.id)}
+                          style={{
+                            padding: '8px 16px', borderRadius: 999,
+                            border: `1.5px solid ${active ? 'var(--color-ink)' : 'var(--color-dust)'}`,
+                            background: active ? 'var(--color-ink)' : 'var(--color-white)',
+                            color: active ? 'var(--color-canvas)' : 'var(--color-ink)',
+                            fontSize: 13, fontWeight: active ? 600 : 400,
+                            cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                            transition: 'all 0.15s ease',
+                          }}>
+                          {active ? '✓ ' : ''}{rate.name} ({rate.rate}%)
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {tax.defaultRateIds.length > 0 && (
+                    <p style={{ fontSize: 12, color: 'var(--color-slate)', marginTop: 10 }}>
+                      Default total: <strong>{totalDefaultPct}%</strong> across {tax.defaultRateIds.length} rate{tax.defaultRateIds.length !== 1 ? 's' : ''}
+                    </p>
+                  )}
+                  {tax.defaultRateIds.length === 0 && (
+                    <p style={{ fontSize: 12, color: 'var(--color-slate)', marginTop: 10 }}>
+                      No default set — you'll be asked to pick a tax rate manually on each payment.
+                    </p>
+                  )}
                 </FormRow>
               )}
             </>

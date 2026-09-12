@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useStudents, useAllBatches, useSettings } from '../../hooks/useDB';
 import { paymentRepository } from '../../db/repositories/paymentRepository';
 import { receiptRepository } from '../../db/repositories/receiptRepository';
 import { settingsRepository } from '../../db/repositories/settingsRepository';
 import { studentRepository } from '../../db/repositories/studentRepository';
 import { FormRow, Spinner } from '../../components/ui/index';
+import { calculateTax, getDefaultTaxRates } from '../../utils/tax';
 // Note: Drive push is triggered from PaymentsPage after form completes
-import type { Student, Payment, Receipt } from '../../types';
+import type { Student, Payment, Receipt, TaxRate } from '../../types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -166,6 +167,35 @@ export function ReceivePaymentForm({ onComplete, onCancel, prefillStudentId }: R
   const currency    = settings?.defaultCurrency ?? 'INR';
   const symbol      = currency === 'INR' ? '₹' : currency;
   const paymentModes = (settings?.paymentModes ?? []).filter(m => m.enabled);
+  const taxSettings  = settings?.taxSettings;
+  const taxEnabled   = !!taxSettings?.enabled;
+  const availableTaxRates = (taxSettings?.rates ?? []).filter(r => r.enabled);
+
+  // Selected tax rates for this payment — pre-filled from defaults, editable
+  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
+  const taxDefaultsAppliedRef = useRef(false);
+
+  // Pre-fill default tax rates once settings load (only once, so user edits aren't reset)
+  useEffect(() => {
+    if (taxDefaultsAppliedRef.current) return;
+    if (!settings) return;
+    const defaults = getDefaultTaxRates(taxSettings);
+    setSelectedTaxIds(defaults.map(r => r.id));
+    taxDefaultsAppliedRef.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
+
+  const toggleTaxRate = (id: string) =>
+    setSelectedTaxIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const selectedTaxRateObjs: TaxRate[] = availableTaxRates.filter(r => selectedTaxIds.includes(r.id));
+
+  // Live tax calculation preview
+  const taxCalc = useMemo(() => {
+    const amt = Number(amount);
+    if (!taxEnabled || !amt || isNaN(amt) || amt <= 0) return null;
+    return calculateTax(amt, selectedTaxRateObjs, !!taxSettings?.amountIsInclusive);
+  }, [amount, taxEnabled, selectedTaxRateObjs, taxSettings?.amountIsInclusive]);
 
   useEffect(() => {
     if (paymentModes.length > 0 && !paymentMode) {
@@ -205,22 +235,29 @@ export function ReceivePaymentForm({ onComplete, onCancel, prefillStudentId }: R
     }
     if (!paymentMode)    { setError('Select a payment mode.'); return; }
     if (!paymentDate)    { setError('Select a payment date.'); return; }
+    if (taxEnabled && availableTaxRates.length > 0 && selectedTaxIds.length === 0) {
+      setError('Select at least one tax rate, or mark a default in Settings → Tax.'); return;
+    }
 
     submittingRef.current = true;
     setSaving(true);
     setError('');
 
     try {
-      // 1. Create payment
+      // 1. Create payment (with tax breakdown if applicable)
       const payment = await paymentRepository.create({
         studentId:   student.id,
         batchId:     batchId || undefined,
-        amount:      Number(amount),
+        amount:      taxCalc ? taxCalc.totalAmount : Number(amount),
         currency,
         paymentMode,
         paymentDate,
         purpose:     purpose || undefined,
         notes:       notes   || undefined,
+        baseAmount:  taxCalc ? taxCalc.baseAmount : undefined,
+        taxAmount:   taxCalc ? taxCalc.taxAmount : undefined,
+        taxLines:    taxCalc && taxCalc.taxLines.length > 0 ? taxCalc.taxLines : undefined,
+        taxInclusive: taxCalc ? !!taxSettings?.amountIsInclusive : undefined,
       });
 
       // 2. Generate receipt number
@@ -347,7 +384,71 @@ export function ReceivePaymentForm({ onComplete, onCancel, prefillStudentId }: R
           </div>
         </FormRow>
 
-        {/* Payment mode — pill selector */}
+        {/* Tax selection — only shown when tax is enabled in Settings */}
+        {taxEnabled && availableTaxRates.length > 0 && (
+          <FormRow
+            label="Tax"
+            hint={taxSettings?.amountIsInclusive
+              ? 'Amount above is treated as tax-inclusive — tax will be extracted from it.'
+              : 'Amount above is the base amount — tax will be added on top.'}
+          >
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: taxCalc ? 12 : 0 }}>
+              {availableTaxRates.map(rate => {
+                const active = selectedTaxIds.includes(rate.id);
+                return (
+                  <button
+                    key={rate.id}
+                    type="button"
+                    onClick={() => toggleTaxRate(rate.id)}
+                    style={{
+                      padding: '7px 16px', borderRadius: 999,
+                      border: `1.5px solid ${active ? 'var(--color-ink)' : 'var(--color-dust)'}`,
+                      background: active ? 'var(--color-ink)' : 'var(--color-white)',
+                      color: active ? 'var(--color-canvas)' : 'var(--color-ink)',
+                      fontSize: 13, fontWeight: active ? 600 : 400,
+                      cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {active ? '✓ ' : ''}{rate.name} ({rate.rate}%)
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Live breakdown preview */}
+            {taxCalc && taxCalc.taxLines.length > 0 && (
+              <div style={{
+                background: 'var(--color-canvas)', borderRadius: 12,
+                padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12, color: 'var(--color-slate)' }}>Base amount</span>
+                  <span style={{ fontSize: 12, color: 'var(--color-ink)', fontWeight: 500 }}>
+                    {symbol}{taxCalc.baseAmount.toLocaleString('en-IN')}
+                  </span>
+                </div>
+                {taxCalc.taxLines.map(line => (
+                  <div key={line.taxRateId} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 12, color: 'var(--color-slate)' }}>{line.name} ({line.rate}%)</span>
+                    <span style={{ fontSize: 12, color: 'var(--color-ink)', fontWeight: 500 }}>
+                      {symbol}{line.amount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                ))}
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  paddingTop: 6, marginTop: 2, borderTop: '1px solid var(--color-dust)',
+                }}>
+                  <span style={{ fontSize: 13, color: 'var(--color-ink)', fontWeight: 700 }}>Total to collect</span>
+                  <span style={{ fontSize: 14, color: 'var(--color-ink)', fontWeight: 700 }}>
+                    {symbol}{taxCalc.totalAmount.toLocaleString('en-IN')}
+                  </span>
+                </div>
+              </div>
+            )}
+          </FormRow>
+        )}
         <FormRow label="Payment Mode" required>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {paymentModes.map(mode => {
