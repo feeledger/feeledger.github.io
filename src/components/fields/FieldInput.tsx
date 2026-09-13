@@ -167,8 +167,10 @@ function DateTimeField({ field, value, onChange, disabled }: FieldInputProps) {
   );
 }
 
-function BooleanField({ value, onChange, disabled }: FieldInputProps) {
+function BooleanField({ field, value, onChange, disabled }: FieldInputProps) {
   const checked = Boolean(value);
+  const onLabel  = field.booleanLabels?.on  ?? 'Yes';
+  const offLabel = field.booleanLabels?.off ?? 'No';
   return (
     <label style={{
       display: 'inline-flex', alignItems: 'center', gap: 10,
@@ -197,7 +199,7 @@ function BooleanField({ value, onChange, disabled }: FieldInputProps) {
         }} />
       </div>
       <span style={{ fontSize: 14, color: 'var(--color-ink)' }}>
-        {checked ? 'Yes' : 'No'}
+        {checked ? onLabel : offLabel}
       </span>
     </label>
   );

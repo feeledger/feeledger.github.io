@@ -2,6 +2,8 @@ import { getDB } from './database';
 import { schemaRepository } from '../repositories/schemaRepository';
 import { settingsRepository } from '../repositories/settingsRepository';
 import { subjectRepository } from '../repositories/batchRepository';
+import { processExpiredBatchMemberships } from '../repositories/batchLifecycle';
+import { runMigrations } from '../repositories/migrations';
 
 /**
  * Runs once on app start.
@@ -24,6 +26,13 @@ export async function initialiseDatabase(): Promise<void> {
     // Ensure settings singleton exists
     const settings = await settingsRepository.get();
     await settingsRepository.save(settings);
+
+    // Apply any pending data/schema migrations (field shape changes, etc.)
+    await runMigrations();
+
+    // Auto-end batch memberships and deactivate students whose only
+    // batch has passed its end date. Runs at most once per calendar day.
+    await processExpiredBatchMemberships();
 
   } catch (err) {
     console.error('[FeeLedger] Database initialisation error:', err);

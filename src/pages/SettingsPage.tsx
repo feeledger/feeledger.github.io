@@ -397,6 +397,30 @@ function SyncTab() {
     } finally { setPulling(false); }
   };
 
+  const [checkingBatches, setCheckingBatches] = useState(false);
+
+  const handleCheckBatches = async () => {
+    setCheckingBatches(true);
+    try {
+      const { processExpiredBatchMemberships } = await import('../db/repositories/batchLifecycle');
+      const result = await processExpiredBatchMemberships(true); // force = bypass once-per-day guard
+      if (result.batchesProcessed === 0) {
+        showMsg('No expired batches found. Everything is up to date.', 'ok');
+      } else {
+        showMsg(
+          `Processed ${result.batchesProcessed} ended batch${result.batchesProcessed !== 1 ? 'es' : ''} — ` +
+          `${result.membershipsEnded} membership${result.membershipsEnded !== 1 ? 's' : ''} ended, ` +
+          `${result.studentsDeactivated} member${result.studentsDeactivated !== 1 ? 's' : ''} marked inactive.`,
+          'ok'
+        );
+      }
+    } catch {
+      showMsg('Check failed. Please try again.', 'err');
+    } finally {
+      setCheckingBatches(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <SectionCard title="Drive Sync Status" subtitle="Your data is stored in your Google Drive">
@@ -430,6 +454,18 @@ function SyncTab() {
             {pulling ? <><Spinner size={14} /> Restoring…</> : '⬇ Restore from Drive'}
           </button>
         </div>
+      </SectionCard>
+
+      <SectionCard title="Batch Lifecycle" subtitle="Automatically ends memberships and deactivates members when a batch's end date passes">
+        <p style={{ fontSize: 14, color: 'var(--color-charcoal)', lineHeight: 1.7, marginBottom: 14 }}>
+          FeeLedger checks once a day automatically: any batch whose <strong>End Date</strong> has passed
+          has its members' batch membership marked complete. A member with no other active batch is then
+          marked <strong>Inactive</strong> — their record and payment history stay fully visible under the
+          "Inactive" or "All" filter in Members.
+        </p>
+        <button className="btn-secondary" onClick={handleCheckBatches} disabled={checkingBatches} style={{ fontSize: 13, padding: '9px 18px', gap: 8 }}>
+          {checkingBatches ? <><Spinner size={14} /> Checking…</> : '🔁 Check expired batches now'}
+        </button>
       </SectionCard>
 
       <SectionCard title="Data Location" subtitle="Where your FeeLedger data lives in Google Drive">

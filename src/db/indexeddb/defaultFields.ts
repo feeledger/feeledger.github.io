@@ -134,10 +134,21 @@ export function getDefaultStudentFields(): StudentFieldDefinition[] {
       createdAt: ts, updatedAt: ts,
     },
     {
-      id: 'fee_frequency', label: 'Fee Frequency', type: 'select',
+      id: 'fee_type', label: 'This is a recurring amount', type: 'boolean',
       required: false, searchable: false, enabled: true,
       showInList: false, showOnReceipt: false,
       category: 'tuition', order: 33,
+      // Unchecked (default) = the amount above is the TOTAL fee due for the whole course.
+      // Checked = the amount above is charged repeatedly at the frequency set below.
+      defaultValue: false,
+      booleanLabels: { on: 'Recurring amount', off: 'Total fee due' },
+      createdAt: ts, updatedAt: ts,
+    },
+    {
+      id: 'fee_frequency', label: 'Fee Frequency', type: 'select',
+      required: false, searchable: false, enabled: true,
+      showInList: false, showOnReceipt: false,
+      category: 'tuition', order: 34,
       options: [
         { id: 'monthly',     label: 'Monthly',      value: 'monthly' },
         { id: 'quarterly',   label: 'Quarterly',    value: 'quarterly' },
@@ -151,36 +162,24 @@ export function getDefaultStudentFields(): StudentFieldDefinition[] {
       createdAt: ts, updatedAt: ts,
     },
     {
-      id: 'fee_type', label: 'Fee Amount Type', type: 'select',
-      required: false, searchable: false, enabled: true,
-      showInList: false, showOnReceipt: false,
-      category: 'tuition', order: 33,
-      options: [
-        { id: 'per_frequency', label: 'Per frequency (monthly/term etc.)', value: 'per_frequency' },
-        { id: 'total',         label: 'Total fees (lifetime/course)',       value: 'total' },
-      ],
-      defaultValue: 'per_frequency',
-      createdAt: ts, updatedAt: ts,
-    },
-    {
       id: 'fee_due_date', label: 'Fee Due Date (Day of Month)', type: 'number',
       required: false, searchable: false, enabled: true,
+      category: 'tuition', order: 35,
       showInList: false, showOnReceipt: false,
-      category: 'tuition', order: 34,
       createdAt: ts, updatedAt: ts,
     },
     {
       id: 'discount', label: 'Discount', type: 'currency',
       required: false, searchable: false, enabled: false,
       showInList: false, showOnReceipt: false,
-      category: 'tuition', order: 35,
+      category: 'tuition', order: 36,
       createdAt: ts, updatedAt: ts,
     },
     {
       id: 'student_status', label: 'Status', type: 'select',
       required: false, searchable: false, enabled: true,
       showInList: true, showOnReceipt: false,
-      category: 'tuition', order: 36,
+      category: 'tuition', order: 37,
       defaultValue: 'active',
       options: [
         { id: 'active',    label: 'Active',    value: 'active' },

@@ -127,6 +127,14 @@ export const paymentRepository = {
     return all.reduce((sum, p) => sum + p.amount, 0);
   },
 
+  /** Sum of all payments with paymentDate >= startDateISO (YYYY-MM-DD, inclusive). */
+  async collectionSince(startDateISO: string): Promise<number> {
+    const all = await getDB().payments
+      .filter(p => !p.archivedAt && p.paymentDate >= startDateISO)
+      .toArray();
+    return all.reduce((sum, p) => sum + p.amount, 0);
+  },
+
   async collectionByMode(): Promise<Record<string, number>> {
     const all = await getDB().payments.filter(p => !p.archivedAt).toArray();
     const result: Record<string, number> = {};

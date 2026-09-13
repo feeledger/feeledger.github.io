@@ -7,6 +7,7 @@ import {
 import { SyncStatusBar } from '../components/SyncStatusBar';
 import { Icons } from '../components/Icons';
 import { Spinner, EmptyState } from '../components/ui/index';
+import { formatYtdLabel, normalizeYtdAnchor } from '../utils/ytd';
 
 function fmt(n: number, cur = 'INR') {
   const s = cur === 'INR' ? '₹' : cur;
@@ -137,19 +138,37 @@ function ModeBreakdown({ data, total, currency }: { data: Record<string, number>
 // ── Main ──────────────────────────────────────────────────────────────────────
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { data: stats,    loading: loadingStats  } = useDashboardStats();
+  const { data: settings, patch: patchSettings         } = useSettings();
+  const { data: stats,    loading: loadingStats  } = useDashboardStats(settings?.ytdStartMonthDay);
   const { data: recent,   loading: loadingRecent } = useRecentPayments(8);
   const { data: students                          } = useStudents();
   const { data: batches                           } = useAllBatches();
-  const { data: settings                          } = useSettings();
   const { data: academicYears                     } = useAcademicYears();
 
   const [filterYear, setFilterYear] = useState('');
+  const [editingYtd, setEditingYtd] = useState(false);
+  const [ytdDraft, setYtdDraft] = useState('');
 
   const currency = settings?.defaultCurrency ?? 'INR';
   const bizName  = settings?.business.businessName;
-  const now      = new Date();
-  const monthName = now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+  const ytdAnchor = normalizeYtdAnchor(settings?.ytdStartMonthDay);
+  const ytdLabel  = stats ? formatYtdLabel(stats.ytdStartDate) : '';
+
+  const openYtdEditor = () => {
+    // Pre-fill the date input with this year's occurrence of the current anchor
+    const [mm, dd] = ytdAnchor.split('-');
+    const thisYear = new Date().getFullYear();
+    setYtdDraft(`${thisYear}-${mm}-${dd}`);
+    setEditingYtd(true);
+  };
+
+  const saveYtdAnchor = async () => {
+    if (!ytdDraft) { setEditingYtd(false); return; }
+    const [, mm, dd] = ytdDraft.split('-');
+    await patchSettings({ ytdStartMonthDay: `${mm}-${dd}` });
+    setEditingYtd(false);
+  };
 
   const activeBatches = useMemo(() => {
     let list = (batches ?? []).filter(b => b.status === 'active');
@@ -253,8 +272,69 @@ export function DashboardPage() {
             <StatCard label="Total Collection" value={fmt(stats?.totalCollection ?? 0, currency)}
               sub={`${stats?.paymentCount ?? 0} payments`} accent
               icon={<Icons.rupee size={18} />} onClick={() => navigate('/app/payments')} />
-            <StatCard label={monthName} value={fmt(stats?.monthlyCollection ?? 0, currency)}
-              sub="This month" icon={<Icons.calendar size={18} />} onClick={() => navigate('/app/payments')} />
+
+            {/* YTD card — editable start date */}
+            <div className="dashboard-stat" style={{ position: 'relative', cursor: 'default' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-slate)' }}>
+                  Year to Date
+                </p>
+                <button
+                  onClick={openYtdEditor}
+                  title="Change YTD start date"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, opacity: 0.4, display: 'flex' }}
+                >
+                  <Icons.edit size={14} color="var(--color-ink)" />
+                </button>
+              </div>
+              <p style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--color-ink)' }}>
+                {fmt(stats?.ytdCollection ?? 0, currency)}
+              </p>
+              <p style={{ fontSize: 12, marginTop: 6, color: 'var(--color-slate)' }}>{ytdLabel}</p>
+
+              {editingYtd && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 19 }}
+                    onClick={() => setEditingYtd(false)}
+                  />
+                  <div style={{
+                  position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 20,
+                  background: 'var(--color-white)', borderRadius: 14,
+                  border: '1px solid var(--color-dust)', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                  padding: 14, minWidth: 220,
+                }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 8 }}>
+                    YTD starts from
+                  </p>
+                  <input
+                    type="date"
+                    value={ytdDraft}
+                    onChange={e => setYtdDraft(e.target.value)}
+                    style={{
+                      width: '100%', padding: '8px 10px', borderRadius: 8,
+                      border: '1px solid var(--color-dust)', fontFamily: 'var(--font-sans)',
+                      fontSize: 13, outline: 'none', marginBottom: 10, boxSizing: 'border-box',
+                    }}
+                  />
+                  <p style={{ fontSize: 11, color: 'var(--color-dust)', marginBottom: 10, lineHeight: 1.4 }}>
+                    Repeats every year on this month and day. e.g. pick April 1 for a financial-year view.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => setEditingYtd(false)}
+                      style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: '1px solid var(--color-dust)', background: 'none', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-sans)', color: 'var(--color-slate)' }}>
+                      Cancel
+                    </button>
+                    <button onClick={saveYtdAnchor}
+                      style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: 'none', background: 'var(--color-ink)', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-sans)', color: 'var(--color-canvas)', fontWeight: 600 }}>
+                      Save
+                    </button>
+                  </div>
+                  </div>
+                </>
+              )}
+            </div>
+
             <StatCard label="Active Members" value={String(stats?.studentCount ?? 0)}
               sub="in database" icon={<Icons.students size={18} />} onClick={() => navigate('/app/students')} />
             <StatCard label="Active Batches" value={String(activeBatches.length)}

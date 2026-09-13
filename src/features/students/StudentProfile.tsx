@@ -12,7 +12,7 @@ interface StudentProfileProps {
 function formatValue(field: StudentFieldDefinition, value: unknown, currency = 'INR'): string {
   if (value === undefined || value === null || value === '') return '—';
   switch (field.type) {
-    case 'boolean':  return value ? 'Yes' : 'No';
+    case 'boolean':  return value ? (field.booleanLabels?.on ?? 'Yes') : (field.booleanLabels?.off ?? 'No');
     case 'currency': return `${currency === 'INR' ? '₹' : currency}${Number(value).toLocaleString('en-IN')}`;
     case 'date':     return value ? new Date(String(value)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
     case 'multiselect': return Array.isArray(value) ? (value as string[]).join(', ') : String(value);
@@ -68,7 +68,9 @@ export function StudentProfile({ studentId, onEdit, onBack }: StudentProfileProp
   const handleWhatsApp = () => {
     if (!whatsappNum) return;
     const feeAmount   = Number(student.values['fee_amount'] ?? 0);
-    const feeType     = String(student.values['fee_type'] ?? 'per_frequency');
+    // fee_type is a boolean now: unchecked/false (default) = Total Fee Due,
+    // checked/true = a recurring amount charged at the frequency below.
+    const isRecurring = Boolean(student.values['fee_type']);
     const feeFreq     = String(student.values['fee_frequency'] ?? '');
     const dueDay      = String(student.values['fee_due_date'] ?? '');
 
@@ -83,10 +85,10 @@ export function StudentProfile({ studentId, onEdit, onBack }: StudentProfileProp
     // Build amount description based on fee_type
     let amountDesc = '';
     if (feeAmount > 0) {
-      if (feeType === 'total') {
-        amountDesc = `${formatAmount(feeAmount, currency)} (total course fees, payable ${freqLabel})`;
-      } else {
+      if (isRecurring) {
         amountDesc = `${formatAmount(feeAmount, currency)} ${freqLabel}`;
+      } else {
+        amountDesc = `${formatAmount(feeAmount, currency)} (total course fees, payable ${freqLabel})`;
       }
     }
 

@@ -6,6 +6,7 @@ import { settingsRepository } from '../db/repositories/settingsRepository';
 import { schemaRepository } from '../db/repositories/schemaRepository';
 import { batchRepository, academicYearRepository, subjectRepository } from '../db/repositories/batchRepository';
 import type { Student, Payment, Receipt, AppSettings, StudentFieldDefinition, Batch, Subject, AcademicYear } from '../types';
+import { resolveYtdStartDate } from '../utils/ytd';
 
 // ── Generic async data hook ───────────────────────────────────────────────────
 
@@ -24,7 +25,11 @@ function useAsync<T>(
   useEffect(() => {
     const handler = () => setTick(t => t + 1);
     window.addEventListener('fl:drive-restored', handler);
-    return () => window.removeEventListener('fl:drive-restored', handler);
+    window.addEventListener('fl:batch-lifecycle-processed', handler);
+    return () => {
+      window.removeEventListener('fl:drive-restored', handler);
+      window.removeEventListener('fl:batch-lifecycle-processed', handler);
+    };
   }, []);
 
   useEffect(() => {
@@ -164,26 +169,28 @@ export interface DashboardStats {
   studentCount: number;
   paymentCount: number;
   totalCollection: number;
-  monthlyCollection: number;
+  ytdCollection: number;
+  ytdStartDate: string; // resolved YYYY-MM-DD, for display
   collectionByMode: Record<string, number>;
   monthlyBreakdown: { month: string; amount: number }[];
 }
 
-export function useDashboardStats() {
+/** @param ytdAnchor Recurring 'MM-DD' anchor for Year-to-Date (e.g. '04-01'). Defaults to calendar year. */
+export function useDashboardStats(ytdAnchor?: string) {
   return useAsync(async (): Promise<DashboardStats> => {
-    const d = new Date();
+    const ytdStartDate = resolveYtdStartDate(ytdAnchor);
     const [
       studentCount,
       paymentCount,
       totalCollection,
-      monthlyCollection,
+      ytdCollection,
       collectionByMode,
       monthlyBreakdown,
     ] = await Promise.all([
       studentRepository.count(),
       paymentRepository.count(),
       paymentRepository.totalCollection(),
-      paymentRepository.monthlyCollection(d.getFullYear(), d.getMonth() + 1),
+      paymentRepository.collectionSince(ytdStartDate),
       paymentRepository.collectionByMode(),
       paymentRepository.monthlyBreakdown(12),
     ]);
@@ -192,11 +199,12 @@ export function useDashboardStats() {
       studentCount,
       paymentCount,
       totalCollection,
-      monthlyCollection,
+      ytdCollection,
+      ytdStartDate,
       collectionByMode,
       monthlyBreakdown,
     };
-  });
+  }, [ytdAnchor]);
 }
 
 // Re-export types for convenience

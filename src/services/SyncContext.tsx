@@ -261,6 +261,19 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // ── Push after onboarding completes or expired batches are processed ─────────
+  // (These mutate local data outside the normal enqueuePush() call sites.)
+
+  useEffect(() => {
+    const handler = () => enqueuePush();
+    window.addEventListener('fl:onboarding-complete', handler);
+    window.addEventListener('fl:batch-lifecycle-processed', handler);
+    return () => {
+      window.removeEventListener('fl:onboarding-complete', handler);
+      window.removeEventListener('fl:batch-lifecycle-processed', handler);
+    };
+  }, [enqueuePush]);
+
   const hasPendingChanges = pendingCount > 0 || syncState === 'error';
 
   return (

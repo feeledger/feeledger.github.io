@@ -55,6 +55,8 @@ export interface FieldDefinition {
   order: number;
   options?: FieldOption[];
   defaultValue?: unknown;
+  /** For type='boolean' fields — custom text shown when on/off, instead of generic "Yes"/"No". */
+  booleanLabels?: { on: string; off: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -316,4 +318,10 @@ export interface AppSettings {
   defaultCurrency: string;
   onboardingComplete: boolean;
   taxSettings?: TaxSettings;
+  /**
+   * Recurring anchor date for the Dashboard's Year-to-Date card, in 'MM-DD' format.
+   * e.g. '01-01' for calendar year, '04-01' for the Indian financial year.
+   * Defaults to '01-01' when unset.
+   */
+  ytdStartMonthDay?: string;
 }
