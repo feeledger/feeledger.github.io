@@ -407,7 +407,7 @@ export function DashboardPage() {
                   </div>
                 ))
               }
-              <button onClick={() => navigate('/app/payments')} className="btn-primary"
+              <button onClick={() => navigate('/app/payments?action=receive')} className="btn-primary"
                 style={{ marginTop: 14, width: '100%', justifyContent: 'center', fontSize: 13, padding: '10px', borderRadius: 'var(--radius-pill)', gap: 8 }}>
                 <Icons.payments size={15} color="var(--color-canvas)" />
                 Receive Payment

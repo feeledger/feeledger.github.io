@@ -39,10 +39,14 @@ export function AppShell() {
       }}
       aria-label="Main navigation"
     >
-      {/* Logo */}
-      <div style={{ padding: '0 6px 20px' }}>
+      {/* Logo — click to go to Dashboard */}
+      <button
+        onClick={() => { navigate('/app/dashboard'); setSidebarOpen(false); }}
+        style={{ background: 'none', border: 'none', padding: '0 6px 20px', cursor: 'pointer', display: 'block', textAlign: 'left' }}
+        aria-label="Go to Dashboard"
+      >
         <Logo size={30} variant="full" dark={true} />
-      </div>
+      </button>
 
       {/* Nav items */}
       {NAV_ITEMS.map(({ to, label, Icon }) => (
@@ -153,7 +157,7 @@ export function AppShell() {
             onClick={() => setSidebarOpen(false)}
             aria-hidden="true"
           />
-          <div style={{ position: 'fixed', left: 0, top: 0, bottom: 0, zIndex: 200, width: 240 }}>
+          <div style={{ position: 'fixed', right: 0, top: 0, bottom: 0, zIndex: 200, width: 240 }}>
             {sidebarContent}
           </div>
         </>
@@ -176,7 +180,13 @@ export function AppShell() {
             zIndex: 100,
           }}
         >
-          <Logo size={28} variant="full" dark={true} />
+          <button
+            onClick={() => navigate('/app/dashboard')}
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}
+            aria-label="Go to Dashboard"
+          >
+            <Logo size={28} variant="full" dark={true} />
+          </button>
           <button
             onClick={() => setSidebarOpen(true)}
             style={{

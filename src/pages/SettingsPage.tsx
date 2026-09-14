@@ -718,7 +718,7 @@ function TaxTab({ settings, onPatch }: { settings: AppSettings; onPatch: (p: Par
 // ── Account Tab ────────────────────────────────────────────────────────────────
 
 function AccountTab() {
-  const { user, signOut, accessToken } = useAuth();
+  const { user, signOut, ensureFreshToken } = useAuth();
   const navigate = useNavigate();
   const [deleting, setDeleting] = useState(false);
   const [confirm, setConfirm] = useState('');
@@ -730,12 +730,13 @@ function AccountTab() {
     setDeleting(true);
     try {
       // Delete the FeeLedger root folder from Drive
-      if (accessToken) {
+      const freshToken = await ensureFreshToken();
+      if (freshToken) {
         const { driveMetaRepository } = await import('../db/repositories/syncRepository');
         const { driveClient } = await import('../services/google/driveClient');
         const meta = await driveMetaRepository.get();
         if (meta.applicationRootFolderId) {
-          await driveClient.deleteFile(accessToken, meta.applicationRootFolderId);
+          await driveClient.deleteFile(freshToken, meta.applicationRootFolderId);
         }
       }
       // Clear local IndexedDB

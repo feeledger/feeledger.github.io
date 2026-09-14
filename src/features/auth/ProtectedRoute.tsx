@@ -1,40 +1,46 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
+import { useSync } from '../../services/SyncContext';
 import { settingsRepository } from '../../db/repositories/settingsRepository';
 
 type OnboardingState = 'checking' | 'needed' | 'done';
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const { initialSyncAttempted } = useSync();
   const location = useLocation();
   const [onboarding, setOnboarding] = useState<OnboardingState>('checking');
-  // Track how many times we've checked — avoids stale-state redirect loop
-  const checkCountRef = useRef(0);
 
   const checkOnboarding = useCallback(() => {
     if (!isAuthenticated) return;
-    checkCountRef.current += 1;
     settingsRepository.isOnboardingComplete().then(complete => {
       setOnboarding(complete ? 'done' : 'needed');
     });
   }, [isAuthenticated]);
 
-  // Re-check every time the location changes so that after the wizard saves
-  // and navigates to /app/dashboard, we re-read IndexedDB and get 'done'
+  // Wait for the initial Drive check to finish before deciding onboarding
+  // status — otherwise an already-onboarded account on a new device would
+  // be routed to onboarding before we've had a chance to pull its existing
+  // settings from Drive. Once the initial sync attempt completes (whether
+  // it restored data, found nothing, or Drive access isn't available),
+  // read local IndexedDB, which by then reflects whatever Drive had.
   useEffect(() => {
+    if (!initialSyncAttempted) return;
     checkOnboarding();
-  }, [checkOnboarding, location.pathname]);
+  }, [initialSyncAttempted, checkOnboarding, location.pathname]);
 
-  // Re-check after Drive restore
+  // Also re-check if Drive data arrives/updates later in the session
+  // (e.g. a manual "Restore from Drive" in Settings).
   useEffect(() => {
-    const handler = () => setTimeout(checkOnboarding, 500);
+    const handler = () => setTimeout(checkOnboarding, 300);
     window.addEventListener('fl:drive-restored', handler);
     return () => window.removeEventListener('fl:drive-restored', handler);
   }, [checkOnboarding]);
 
   if (isLoading) return <LoadingScreen message="Loading FeeLedger…" />;
   if (!isAuthenticated) return <Navigate to="/" state={{ from: location }} replace />;
+  if (!initialSyncAttempted) return <LoadingScreen message="Checking your account…" />;
   if (onboarding === 'checking') return <LoadingScreen message="Setting up…" />;
 
   // Only redirect to onboarding if we're NOT already on an onboarding route

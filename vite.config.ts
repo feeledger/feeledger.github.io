@@ -63,7 +63,7 @@ export default defineConfig({
             name: 'Receive Payment',
             short_name: 'Payment',
             description: 'Record a new fee payment',
-            url: '/app/payments',
+            url: '/app/payments?action=receive',
             icons: [{ src: '/logo-192.png', sizes: '192x192' }],
           },
           {

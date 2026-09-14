@@ -11,6 +11,8 @@ interface AuthState {
   isLoading: boolean;
   isAuthenticated: boolean;
   accessToken: string | null;
+  /** Epoch ms when accessToken expires. null if no token or unknown. */
+  tokenExpiresAt: number | null;
   hasDriveAccess: boolean;
   gisReady: boolean;
 }
@@ -19,6 +21,13 @@ interface AuthContextValue extends AuthState {
   signIn: () => void;
   signOut: () => void;
   requestDriveAccess: () => Promise<boolean>;
+  /**
+   * Returns a Drive access token guaranteed to be valid for at least a
+   * couple more minutes, refreshing it silently first if the current one
+   * is missing, expired, or about to expire. Returns null if no token
+   * could be obtained (caller should treat this as "no Drive access").
+   */
+  ensureFreshToken: () => Promise<string | null>;
 }
 
 // ── GIS window types ─────────────────────────────────────────────────────────
@@ -59,6 +68,7 @@ interface GoogleCredentialResponse {
 
 interface GoogleTokenResponse {
   access_token: string;
+  expires_in?: number; // seconds, typically 3599
   error?: string;
 }
 
@@ -88,10 +98,21 @@ function buildUser(credential: string): AppUser {
 }
 
 // Use localStorage so session persists across tab closes and PWA restarts.
-// Token is cleared on explicit sign-out only.
-const SESSION_USER_KEY  = 'fl_user';
-const SESSION_TOKEN_KEY = 'fl_token';
+// The identity (who's signed in) persists indefinitely — but the Drive
+// access TOKEN itself expires (~1hr from Google) and is refreshed silently
+// as needed; it is never trusted purely because it exists in storage.
+const SESSION_USER_KEY   = 'fl_user';
+const SESSION_TOKEN_KEY  = 'fl_token';
+const TOKEN_EXPIRES_KEY  = 'fl_token_expires_at';
 const STORAGE = localStorage;
+
+// Refresh proactively if less than this many ms remain on the token.
+const REFRESH_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
+const DEFAULT_TOKEN_LIFETIME_S = 3600;
+
+function isTokenValid(expiresAt: number | null): boolean {
+  return !!expiresAt && Date.now() < expiresAt - REFRESH_BUFFER_MS;
+}
 
 // ── Context ──────────────────────────────────────────────────────────────────
 
@@ -103,12 +124,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: true,
     isAuthenticated: false,
     accessToken: null,
+    tokenExpiresAt: null,
     hasDriveAccess: false,
     gisReady: false,
   });
 
-  const tokenClientRef = useRef<TokenClient | null>(null);
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  // Tracks an in-flight silent refresh so concurrent callers share one promise
+  // instead of firing multiple simultaneous token requests.
+  const refreshInFlightRef = useRef<Promise<string | null> | null>(null);
 
   // ── Restore session on mount ─────────────────────────────────────────────
 
@@ -116,15 +140,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const raw = STORAGE.getItem(SESSION_USER_KEY);
       const tok = STORAGE.getItem(SESSION_TOKEN_KEY);
+      const expiresRaw = STORAGE.getItem(TOKEN_EXPIRES_KEY);
+      const expiresAt = expiresRaw ? Number(expiresRaw) : null;
+
       if (raw) {
         const user = JSON.parse(raw) as AppUser;
+        const tokenStillValid = isTokenValid(expiresAt);
         setState(s => ({
           ...s,
           user,
           isAuthenticated: true,
           isLoading: false,
-          accessToken: tok,
-          hasDriveAccess: !!tok,
+          // Only trust a persisted token if it hasn't actually expired.
+          // An expired/near-expired token is treated as "no Drive access yet"
+          // so the app silently refreshes it before the first Drive call,
+          // instead of attempting a request that will 401.
+          accessToken: tokenStillValid ? tok : null,
+          tokenExpiresAt: tokenStillValid ? expiresAt : null,
+          hasDriveAccess: tokenStillValid && !!tok,
         }));
         return;
       }
@@ -142,12 +175,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!clientId) {
-      // No client ID configured — dev/preview mode, GIS not needed
       setState(s => ({ ...s, gisReady: false }));
       return;
     }
 
-    // GIS script may load before or after React mounts. Poll until ready.
     let attempts = 0;
     const maxAttempts = 40; // 10 seconds
 
@@ -156,16 +187,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.google.accounts.id.initialize({
           client_id: clientId,
           callback: handleCredential,
-          auto_select: false,          // don't auto-sign-in silently
+          auto_select: false,
           cancel_on_tap_outside: true,
           ux_mode: 'popup',
-        });
-
-        // Pre-init the token client for Drive
-        tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          scope: 'https://www.googleapis.com/auth/drive.file',
-          callback: '', // will be set at request time
         });
 
         setState(s => ({ ...s, gisReady: true }));
@@ -185,7 +209,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(() => {
     if (!clientId || !state.gisReady) {
-      // Dev mode — inject a mock user so you can test the app without GIS
       const mock: AppUser = {
         id: 'dev_user_01',
         email: 'dev@feeledger.app',
@@ -193,16 +216,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(mock));
+      STORAGE.setItem(SESSION_USER_KEY, JSON.stringify(mock));
       setState(s => ({ ...s, user: mock, isAuthenticated: true, isLoading: false }));
       return;
     }
 
-    // Show the Google One Tap / popup
     window.google!.accounts.id.prompt((notification) => {
       if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        // One Tap was blocked (browser settings, or user previously dismissed).
-        // Fall back to the token-client popup which always works.
         requestDriveAndIdentify();
       }
     });
@@ -224,7 +244,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       callback: async (resp: GoogleTokenResponse) => {
         if (resp.error || !resp.access_token) return;
 
-        // Fetch identity from Google's userinfo endpoint
+        const expiresAt = Date.now() + (resp.expires_in ?? DEFAULT_TOKEN_LIFETIME_S) * 1000;
+
         try {
           const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${resp.access_token}` },
@@ -244,20 +265,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           STORAGE.setItem(SESSION_USER_KEY, JSON.stringify(user));
           STORAGE.setItem(SESSION_TOKEN_KEY, resp.access_token);
+          STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
           setState(s => ({
             ...s,
             user,
             isAuthenticated: true,
             isLoading: false,
             accessToken: resp.access_token,
+            tokenExpiresAt: expiresAt,
             hasDriveAccess: true,
           }));
         } catch {
-          // identity fetch failed — at minimum store token
           STORAGE.setItem(SESSION_TOKEN_KEY, resp.access_token);
+          STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
           setState(s => ({
             ...s,
             accessToken: resp.access_token,
+            tokenExpiresAt: expiresAt,
             hasDriveAccess: true,
           }));
         }
@@ -267,14 +291,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     tc.requestAccessToken({ prompt: 'select_account' });
   }, [clientId]);
 
-  // ── Request Drive access separately (called after sign-in if needed) ─────
+  // ── Request Drive access (interactive-capable — used on first grant) ─────
 
   const requestDriveAccess = useCallback((): Promise<boolean> => {
     if (!clientId || !window.google) {
-      // Dev mode
       const mockToken = 'dev_token_mock';
+      const expiresAt = Date.now() + DEFAULT_TOKEN_LIFETIME_S * 1000;
       STORAGE.setItem(SESSION_TOKEN_KEY, mockToken);
-      setState(s => ({ ...s, accessToken: mockToken, hasDriveAccess: true }));
+      STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
+      setState(s => ({ ...s, accessToken: mockToken, tokenExpiresAt: expiresAt, hasDriveAccess: true }));
       return Promise.resolve(true);
     }
 
@@ -287,24 +312,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             resolve(false);
             return;
           }
+          const expiresAt = Date.now() + (resp.expires_in ?? DEFAULT_TOKEN_LIFETIME_S) * 1000;
           STORAGE.setItem(SESSION_TOKEN_KEY, resp.access_token);
+          STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
           setState(s => ({
             ...s,
             accessToken: resp.access_token,
+            tokenExpiresAt: expiresAt,
             hasDriveAccess: true,
           }));
           resolve(true);
         },
       });
-      tc.requestAccessToken({ prompt: '' }); // no extra prompt if already consented
+      // Empty prompt = attempt silently first; Google shows UI only if
+      // this app+scope has never been consented to in this browser before.
+      tc.requestAccessToken({ prompt: '' });
     });
   }, [clientId]);
+
+  // ── Ensure a fresh token — the function nearly everything should call ────
+
+  const ensureFreshToken = useCallback((): Promise<string | null> => {
+    // Read the LATEST state via a functional update trick isn't available outside
+    // setState, so we re-read from storage as the source of truth here, since
+    // this can be called from contexts where `state` might be a stale closure.
+    const tok = STORAGE.getItem(SESSION_TOKEN_KEY);
+    const expiresRaw = STORAGE.getItem(TOKEN_EXPIRES_KEY);
+    const expiresAt = expiresRaw ? Number(expiresRaw) : null;
+
+    if (tok && isTokenValid(expiresAt)) {
+      return Promise.resolve(tok);
+    }
+
+    // Share one in-flight refresh across concurrent callers
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+
+    const refreshPromise = requestDriveAccess()
+      .then(granted => (granted ? STORAGE.getItem(SESSION_TOKEN_KEY) : null))
+      .finally(() => { refreshInFlightRef.current = null; });
+
+    refreshInFlightRef.current = refreshPromise;
+    return refreshPromise;
+  }, [requestDriveAccess]);
 
   // ── Sign out ─────────────────────────────────────────────────────────────
 
   const signOut = useCallback(() => {
     STORAGE.removeItem(SESSION_USER_KEY);
     STORAGE.removeItem(SESSION_TOKEN_KEY);
+    STORAGE.removeItem(TOKEN_EXPIRES_KEY);
 
     if (clientId && window.google?.accounts?.id) {
       window.google.accounts.id.disableAutoSelect();
@@ -316,6 +372,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading: false,
       isAuthenticated: false,
       accessToken: null,
+      tokenExpiresAt: null,
       hasDriveAccess: false,
       gisReady: state.gisReady,
     });
@@ -323,7 +380,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...state, signIn, signOut, requestDriveAccess }}
+      value={{ ...state, signIn, signOut, requestDriveAccess, ensureFreshToken }}
     >
       {children}
     </AuthContext.Provider>

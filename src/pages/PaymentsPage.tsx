@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { usePayments, useStudents, useAllBatches, useSettings, useStudentFields } from '../hooks/useDB';
 import { paymentRepository } from '../db/repositories/paymentRepository';
 import { ReceivePaymentForm, type PaymentResult } from '../features/payments/ReceivePaymentForm';
@@ -177,7 +178,10 @@ export function PaymentsPage() {
   const { data: fields }    = useStudentFields();
 
   const { push: syncPush } = useSync();
-  const [mode, setMode]           = useState<PageMode>('list');
+  const [searchParams] = useSearchParams();
+  const [mode, setMode]           = useState<PageMode>(
+    searchParams.get('action') === 'receive' ? 'receive' : 'list'
+  );
   const [successResult, setSuccessResult] = useState<PaymentResult | null>(null);
   const [viewerData, setViewerData] = useState<ReceiptData | null>(null);
 
