@@ -5,10 +5,12 @@ import { Toggle, FormRow, Spinner } from '../../components/ui/index';
 import { settingsRepository } from '../../db/repositories/settingsRepository';
 import { schemaRepository } from '../../db/repositories/schemaRepository';
 import { academicYearRepository } from '../../db/repositories/batchRepository';
+import { useSync } from '../../services/SyncContext';
 
 // ── Step indicator ────────────────────────────────────────────────────────────
 
 const STEPS = [
+  { label: 'Connect',       emoji: '🔗' },
   { label: 'Business',      emoji: '🏢' },
   { label: 'Fields',        emoji: '📋' },
   { label: 'Receipt',       emoji: '🧾' },
@@ -68,6 +70,85 @@ const IS: React.CSSProperties = {
   fontSize: 15, color: 'var(--color-ink)', outline: 'none',
   boxSizing: 'border-box', transition: 'border-color 0.15s ease',
 };
+
+// ── Step 0 — Connect Google Drive ─────────────────────────────────────────────
+
+function StepConnectDrive({
+  onNext,
+}: {
+  onNext: () => void;
+}) {
+  const { connectDrive } = useSync();
+  const [connecting, setConnecting] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    setError('');
+    try {
+      const ok = await connectDrive();
+      if (ok) {
+        setConnected(true);
+        setTimeout(onNext, 900);
+      } else {
+        setError('Connection was cancelled or blocked by your browser. Please try again.');
+      }
+    } catch {
+      setError('Something went wrong connecting to Google Drive. Please try again.');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  return (
+    <div style={{ textAlign: 'center', padding: '8px 0' }}>
+      <div style={{ fontSize: 56, lineHeight: 1, marginBottom: 20 }}>
+        {connected ? '✅' : '🔗'}
+      </div>
+      <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 10 }}>
+        {connected ? 'Google Drive connected!' : 'Connect your Google Drive'}
+      </h2>
+      <p style={{ fontSize: 15, color: 'var(--color-slate)', maxWidth: 400, margin: '0 auto 28px', lineHeight: 1.7 }}>
+        {connected
+          ? "You're all set. Your data will now sync automatically."
+          : <>FeeLedger saves everything — members, payments, receipts — directly to a{' '}
+              <strong>FeeLedger</strong> folder in your own Google Drive. We never see it or store
+              it ourselves. This also lets you pick up right where you left off on another device.</>
+        }
+      </p>
+
+      {error && (
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 20, maxWidth: 400, margin: '0 auto 20px' }}>
+          <p style={{ fontSize: 13, color: '#b91c1c' }}>{error}</p>
+        </div>
+      )}
+
+      {!connected && (
+        <button
+          className="btn-primary"
+          onClick={handleConnect}
+          disabled={connecting}
+          style={{ padding: '13px 32px', fontSize: 16, gap: 10, borderRadius: 'var(--radius-pill)' }}
+        >
+          {connecting ? <><Spinner size={16} /> Connecting…</> : '🔗 Connect Google Drive'}
+        </button>
+      )}
+
+      {!connected && (
+        <div style={{ marginTop: 20 }}>
+          <button
+            onClick={onNext}
+            disabled={connecting}
+            style={{ background: 'none', border: 'none', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: 13, color: 'var(--color-slate)', fontFamily: 'var(--font-sans)', textDecoration: 'underline' }}
+          >
+            Skip for now — I'll connect it later in Settings
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Step 1 — Business profile ─────────────────────────────────────────────────
 
@@ -404,16 +485,21 @@ export function OnboardingWizard() {
   const [businessData, setBusinessData] = useState<BusinessForm | null>(null);
   const [enabledFieldIds, setEnabledFieldIds] = useState<string[]>([]);
 
+  // Step 0 → 1
+  const handleConnectNext = () => {
+    setStep(1);
+  };
+
   // Step 1 → 2
   const handleBusinessNext = (data: BusinessForm) => {
     setBusinessData(data);
-    setStep(1);
+    setStep(2);
   };
 
   // Step 2 → 3
   const handleFieldsNext = (enabled: string[]) => {
     setEnabledFieldIds(enabled);
-    setStep(2);
+    setStep(3);
   };
 
   // Step 3 → save everything → Step 4
@@ -462,12 +548,12 @@ export function OnboardingWizard() {
         }
       }
 
-      setStep(3);
+      setStep(4);
       // Signal to SyncContext that data is ready to push
       window.dispatchEvent(new CustomEvent('fl:onboarding-complete'));
     } catch (err) {
       console.error('Onboarding save error:', err);
-      setStep(3);
+      setStep(4);
     } finally {
       setSaving(false);
     }
@@ -522,10 +608,11 @@ export function OnboardingWizard() {
 
           {!saving && (
             <>
-              {step === 0 && <StepBusiness onNext={handleBusinessNext} />}
-              {step === 1 && <StepFields onNext={handleFieldsNext} onBack={() => setStep(0)} />}
-              {step === 2 && <StepReceipt onNext={handleReceiptNext} onBack={() => setStep(1)} />}
-              {step === 3 && (
+              {step === 0 && <StepConnectDrive onNext={handleConnectNext} />}
+              {step === 1 && <StepBusiness onNext={handleBusinessNext} />}
+              {step === 2 && <StepFields onNext={handleFieldsNext} onBack={() => setStep(1)} />}
+              {step === 3 && <StepReceipt onNext={handleReceiptNext} onBack={() => setStep(2)} />}
+              {step === 4 && (
                 <StepDone
                   businessName={businessData?.businessName ?? ''}
                   onEnter={handleEnter}

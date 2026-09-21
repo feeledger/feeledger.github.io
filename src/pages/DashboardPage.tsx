@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   useDashboardStats, useRecentPayments,
@@ -15,16 +16,8 @@ function fmt(n: number, cur = 'INR') {
   if (n >= 1000)   return `${s}${(n/1000).toFixed(1)}K`;
   return `${s}${n.toLocaleString('en-IN')}`;
 }
-function fmtFull(n: number, cur = 'INR') {
-  const s = cur === 'INR' ? '₹' : cur;
-  return `${s}${n.toLocaleString('en-IN')}`;
-}
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-function monthLabel(yyyyMM: string) {
-  const [y, m] = yyyyMM.split('-');
-  return new Date(Number(y), Number(m)-1).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
@@ -62,42 +55,6 @@ function StatCard({ label, value, sub, accent, onClick, icon }: {
         {value}
       </p>
       {sub && <p style={{ fontSize: 12, marginTop: 6, color: accent ? 'rgba(255,255,255,0.4)' : 'var(--color-slate)' }}>{sub}</p>}
-    </div>
-  );
-}
-
-// ── Bar chart ─────────────────────────────────────────────────────────────────
-function BarChart({ data, currency }: { data: { month: string; amount: number }[]; currency: string }) {
-  const max = Math.max(...data.map(d => d.amount), 1);
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 100, paddingBottom: 2 }}>
-      {data.map(({ month, amount }) => {
-        const pct = (amount / max) * 100;
-        const isNow = month === currentMonth;
-        return (
-          <div key={month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 0 }}
-            title={`${monthLabel(month)}: ${fmtFull(amount, currency)}`}>
-            <div style={{
-              width: '100%', borderRadius: '3px 3px 0 0',
-              background: isNow
-                ? 'linear-gradient(180deg, #141413 0%, #3d3c3a 100%)'
-                : 'var(--color-dust)',
-              height: `${Math.max(pct, 3)}%`,
-              minHeight: 3,
-              transition: 'height 0.4s ease',
-            }} />
-            <p style={{
-              fontSize: 8, color: isNow ? 'var(--color-ink)' : 'var(--color-dust)',
-              fontWeight: isNow ? 700 : 400, textAlign: 'center',
-              transform: 'rotate(-40deg)', transformOrigin: 'top center',
-              marginTop: 6, whiteSpace: 'nowrap',
-            }}>
-              {monthLabel(month)}
-            </p>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -148,6 +105,8 @@ export function DashboardPage() {
   const [filterYear, setFilterYear] = useState('');
   const [editingYtd, setEditingYtd] = useState(false);
   const [ytdDraft, setYtdDraft] = useState('');
+  const [ytdPopoverPos, setYtdPopoverPos] = useState({ top: 0, left: 0, width: 0 });
+  const ytdEditBtnRef = useRef<HTMLButtonElement>(null);
 
   const currency = settings?.defaultCurrency ?? 'INR';
   const bizName  = settings?.business.businessName;
@@ -160,6 +119,14 @@ export function DashboardPage() {
     const [mm, dd] = ytdAnchor.split('-');
     const thisYear = new Date().getFullYear();
     setYtdDraft(`${thisYear}-${mm}-${dd}`);
+
+    // Position the popover relative to the whole YTD card (its parent), not
+    // just the small edit button, so it lines up with the card's left edge.
+    const card = ytdEditBtnRef.current?.closest('.dashboard-stat') as HTMLElement | null;
+    const rect = (card ?? ytdEditBtnRef.current)?.getBoundingClientRect();
+    if (rect) {
+      setYtdPopoverPos({ top: rect.bottom + 8, left: rect.left, width: rect.width });
+    }
     setEditingYtd(true);
   };
 
@@ -280,6 +247,7 @@ export function DashboardPage() {
                   Year to Date
                 </p>
                 <button
+                  ref={ytdEditBtnRef}
                   onClick={openYtdEditor}
                   title="Change YTD start date"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, opacity: 0.4, display: 'flex' }}
@@ -291,18 +259,31 @@ export function DashboardPage() {
                 {fmt(stats?.ytdCollection ?? 0, currency)}
               </p>
               <p style={{ fontSize: 12, marginTop: 6, color: 'var(--color-slate)' }}>{ytdLabel}</p>
+            </div>
 
-              {editingYtd && (
-                <>
-                  <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 19 }}
-                    onClick={() => setEditingYtd(false)}
-                  />
-                  <div style={{
-                  position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 20,
+            {/*
+              Rendered via a portal directly into document.body — the YTD
+              card above has backdrop-filter, which creates its own CSS
+              stacking context and traps any absolutely-positioned child
+              behind LATER sibling cards that also use backdrop-filter
+              (By Payment Mode, Recent Payments, etc), no matter how high
+              the child's own z-index is set. A portal sidesteps this
+              entirely by rendering outside that stacking context.
+            */}
+            {editingYtd && createPortal(
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+                  onClick={() => setEditingYtd(false)}
+                />
+                <div style={{
+                  position: 'fixed',
+                  top: ytdPopoverPos.top,
+                  left: ytdPopoverPos.left,
+                  zIndex: 1000,
                   background: 'var(--color-white)', borderRadius: 14,
-                  border: '1px solid var(--color-dust)', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-                  padding: 14, minWidth: 220,
+                  border: '1px solid var(--color-dust)', boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
+                  padding: 14, width: Math.max(ytdPopoverPos.width, 220),
                 }}>
                   <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 8 }}>
                     YTD starts from
@@ -330,10 +311,10 @@ export function DashboardPage() {
                       Save
                     </button>
                   </div>
-                  </div>
-                </>
-              )}
-            </div>
+                </div>
+              </>,
+              document.body
+            )}
 
             <StatCard label="Active Members" value={String(stats?.studentCount ?? 0)}
               sub="in database" icon={<Icons.students size={18} />} onClick={() => navigate('/app/students')} />
@@ -341,24 +322,51 @@ export function DashboardPage() {
               sub="running now" icon={<Icons.batches size={18} />} onClick={() => navigate('/app/batches')} />
           </div>
 
-          {/* Charts */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%,280px),1fr))', gap: 14, marginBottom: 16 }}>
-            <div style={{
+          {/* Bottom section — Recent Payments spans both rows on desktop */}
+          <div className="dashboard-bottom-grid">
+            {/* Recent payments — tall */}
+            <div className="dashboard-recent-payments-tall" style={{
               background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
               border: '1px solid rgba(255,255,255,0.85)',
               boxShadow: '0 2px 16px rgba(0,0,0,0.05)',
-              borderRadius: 20, padding: '18px 18px 32px',
+              borderRadius: 20, padding: 18,
+              display: 'flex', flexDirection: 'column',
             }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-slate)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>
-                Monthly Collection
-              </p>
-              {(stats?.monthlyBreakdown ?? []).length < 2
-                ? <p style={{ fontSize: 13, color: 'var(--color-dust)', padding: '16px 0' }}>Not enough data yet.</p>
-                : <BarChart data={stats!.monthlyBreakdown} currency={currency} />
-              }
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-slate)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Recent Payments
+                </p>
+                <button onClick={() => navigate('/app/payments')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--color-link)', fontWeight: 600, fontFamily: 'var(--font-sans)' }}>
+                  View all
+                </button>
+              </div>
+              <div style={{ flex: 1 }}>
+                {filteredRecent.length === 0
+                  ? <EmptyState emoji="💸" title="No payments yet" />
+                  : filteredRecent.map((p, i) => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: i < filteredRecent.length - 1 ? '1px solid var(--color-dust)' : 'none' }}>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: 'var(--color-canvas)', border: '1px solid var(--color-dust)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'var(--color-ink)' }}>
+                        {studentName(p.studentId).charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{studentName(p.studentId)}</p>
+                        <p style={{ fontSize: 11, color: 'var(--color-slate)' }}>{fmtDate(p.paymentDate)} · {p.paymentMode}</p>
+                      </div>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-ink)', flexShrink: 0 }}>{fmt(p.amount, currency)}</p>
+                    </div>
+                  ))
+                }
+              </div>
+              <button onClick={() => navigate('/app/payments?action=receive')} className="btn-primary"
+                style={{ marginTop: 14, width: '100%', justifyContent: 'center', fontSize: 13, padding: '10px', borderRadius: 'var(--radius-pill)', gap: 8 }}>
+                <Icons.payments size={15} color="var(--color-canvas)" />
+                Receive Payment
+              </button>
             </div>
 
+            {/* By payment mode */}
             <div style={{
               background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
@@ -370,48 +378,6 @@ export function DashboardPage() {
                 By Payment Mode
               </p>
               <ModeBreakdown data={stats?.collectionByMode ?? {}} total={stats?.totalCollection ?? 0} currency={currency} />
-            </div>
-          </div>
-
-          {/* Bottom row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%,280px),1fr))', gap: 14 }}>
-            {/* Recent payments */}
-            <div style={{
-              background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              border: '1px solid rgba(255,255,255,0.85)',
-              boxShadow: '0 2px 16px rgba(0,0,0,0.05)',
-              borderRadius: 20, padding: 18,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-slate)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  Recent Payments
-                </p>
-                <button onClick={() => navigate('/app/payments')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--color-link)', fontWeight: 600, fontFamily: 'var(--font-sans)' }}>
-                  View all
-                </button>
-              </div>
-              {filteredRecent.length === 0
-                ? <EmptyState emoji="💸" title="No payments yet" />
-                : filteredRecent.map((p, i) => (
-                  <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: i < filteredRecent.length - 1 ? '1px solid var(--color-dust)' : 'none' }}>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: 'var(--color-canvas)', border: '1px solid var(--color-dust)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'var(--color-ink)' }}>
-                      {studentName(p.studentId).charAt(0).toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{studentName(p.studentId)}</p>
-                      <p style={{ fontSize: 11, color: 'var(--color-slate)' }}>{fmtDate(p.paymentDate)} · {p.paymentMode}</p>
-                    </div>
-                    <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-ink)', flexShrink: 0 }}>{fmt(p.amount, currency)}</p>
-                  </div>
-                ))
-              }
-              <button onClick={() => navigate('/app/payments?action=receive')} className="btn-primary"
-                style={{ marginTop: 14, width: '100%', justifyContent: 'center', fontSize: 13, padding: '10px', borderRadius: 'var(--radius-pill)', gap: 8 }}>
-                <Icons.payments size={15} color="var(--color-canvas)" />
-                Receive Payment
-              </button>
             </div>
 
             {/* Active batches */}

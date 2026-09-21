@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useSync, type SyncState } from '../services/SyncContext';
 
 function formatRelativeTime(iso: string): string {
@@ -29,12 +30,34 @@ interface SyncStatusBarProps {
 }
 
 export function SyncStatusBar({ sidebar = false }: SyncStatusBarProps) {
-  const { syncState, lastSyncedAt, errorMessage, pendingCount, syncNow } = useSync();
+  const { syncState, lastSyncedAt, errorMessage, pendingCount, syncNow, connectDrive } = useSync();
+  const [connecting, setConnecting] = useState(false);
   const config = STATE_CONFIG[syncState];
 
   const pendingLabel = pendingCount > 0 && syncState !== 'synced'
     ? `${pendingCount} pending`
     : null;
+
+  // In 'no_drive' state, always go through the explicit interactive connect
+  // flow (guaranteed visible consent dialog). For 'error', a plain retry
+  // via syncNow is enough since Drive access already exists.
+  const handleAction = async () => {
+    if (connecting) return;
+    if (syncState === 'no_drive') {
+      setConnecting(true);
+      try { await connectDrive(); } finally { setConnecting(false); }
+    } else {
+      syncNow();
+    }
+  };
+
+  const actionLabel = connecting
+    ? 'Connecting…'
+    : syncState === 'no_drive'
+    ? 'Connect Drive'
+    : syncState === 'syncing'
+    ? 'Syncing…'
+    : 'Sync now';
 
   if (sidebar) {
     return (
@@ -46,16 +69,16 @@ export function SyncStatusBar({ sidebar = false }: SyncStatusBarProps) {
           backgroundColor: syncState === 'error'
             ? 'rgba(239,68,68,0.12)'
             : 'rgba(255,255,255,0.05)',
-          cursor: config.action ? 'pointer' : 'default',
+          cursor: (config.action || connecting) ? 'pointer' : 'default',
           transition: 'background 0.15s ease',
         }}
-        onClick={config.action ? syncNow : undefined}
+        onClick={config.action ? handleAction : undefined}
         title={errorMessage ?? (lastSyncedAt ? `Last synced: ${formatRelativeTime(lastSyncedAt)}` : 'Not synced yet')}
       >
         <div style={{
           width: 7, height: 7, borderRadius: '50%',
           backgroundColor: config.dot, flexShrink: 0,
-          animation: config.pulse ? 'fl-pulse 1s ease-in-out infinite' : 'none',
+          animation: (config.pulse || connecting) ? 'fl-pulse 1s ease-in-out infinite' : 'none',
         }} />
         <span style={{
           color: syncState === 'error' ? '#fca5a5' : 'rgba(255,255,255,0.5)',
@@ -63,11 +86,11 @@ export function SyncStatusBar({ sidebar = false }: SyncStatusBarProps) {
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           flex: 1,
         }}>
-          {config.label}
+          {connecting ? 'Connecting…' : config.label}
           {syncState === 'synced' && lastSyncedAt ? ` · ${formatRelativeTime(lastSyncedAt)}` : ''}
           {pendingLabel ? ` · ${pendingLabel}` : ''}
         </span>
-        {config.action && (
+        {config.action && !connecting && (
           <span style={{ color: syncState === 'error' ? '#fca5a5' : 'rgba(255,255,255,0.4)', fontSize: 13 }}>↺</span>
         )}
         <style>{`
@@ -100,21 +123,21 @@ export function SyncStatusBar({ sidebar = false }: SyncStatusBarProps) {
       <div style={{
         width: 10, height: 10, borderRadius: '50%',
         backgroundColor: config.dot, flexShrink: 0,
-        animation: config.pulse ? 'fl-pulse 1s ease-in-out infinite' : 'none',
+        animation: (config.pulse || connecting) ? 'fl-pulse 1s ease-in-out infinite' : 'none',
       }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', margin: 0 }}>
-          {config.label}
+          {connecting ? 'Connecting to Google Drive…' : config.label}
           {pendingLabel && (
             <span style={{ fontWeight: 400, color: 'var(--color-slate)', marginLeft: 6 }}>
               · {pendingLabel}
             </span>
           )}
         </p>
-        {errorMessage && (
+        {errorMessage && !connecting && (
           <p style={{ fontSize: 12, color: '#b91c1c', margin: '2px 0 0' }}>{errorMessage}</p>
         )}
-        {!errorMessage && lastSyncedAt && (
+        {!errorMessage && !connecting && lastSyncedAt && (
           <p style={{ fontSize: 12, color: 'var(--color-slate)', margin: '2px 0 0' }}>
             Last synced {formatRelativeTime(lastSyncedAt)}
           </p>
@@ -124,11 +147,16 @@ export function SyncStatusBar({ sidebar = false }: SyncStatusBarProps) {
             Changes will sync when you're back online.
           </p>
         )}
+        {syncState === 'no_drive' && !connecting && (
+          <p style={{ fontSize: 12, color: 'var(--color-slate)', margin: '2px 0 0' }}>
+            Your data is only on this device until you connect Google Drive.
+          </p>
+        )}
       </div>
       {(config.action || syncState === 'idle' || syncState === 'synced') && (
         <button
-          onClick={syncNow}
-          disabled={syncState === 'syncing'}
+          onClick={handleAction}
+          disabled={syncState === 'syncing' || connecting}
           style={{
             background: 'none', border: 'none', cursor: 'pointer',
             fontSize: 13, color: 'var(--color-link)',
@@ -136,7 +164,7 @@ export function SyncStatusBar({ sidebar = false }: SyncStatusBarProps) {
             flexShrink: 0, padding: '4px 8px',
           }}
         >
-          {syncState === 'syncing' ? 'Syncing…' : 'Sync now'}
+          {actionLabel}
         </button>
       )}
       <style>{`

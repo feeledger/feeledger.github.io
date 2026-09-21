@@ -365,15 +365,29 @@ function WhatsAppTab() {
 // ── Sync tab ──────────────────────────────────────────────────────────────────
 
 function SyncTab() {
-  const { syncState, push, pull, pendingCount, hasPendingChanges } = useSync();
+  const { syncState, push, pull, pendingCount, hasPendingChanges, connectDrive } = useSync();
   const [pushing, setPushing]     = useState(false);
   const [pulling, setPulling]     = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [msg, setMsg]             = useState('');
   const [msgType, setMsgType]     = useState<'ok'|'err'>('ok');
 
   const showMsg = (text: string, type: 'ok'|'err' = 'ok') => {
     setMsg(text); setMsgType(type);
     setTimeout(() => setMsg(''), 5000);
+  };
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const ok = await connectDrive();
+      if (ok) showMsg('Google Drive connected. Your data is syncing now.', 'ok');
+      else showMsg('Connection was cancelled or blocked. Please try again.', 'err');
+    } catch {
+      showMsg('Could not connect to Google Drive. Please try again.', 'err');
+    } finally {
+      setConnecting(false);
+    }
   };
 
   const handlePush = async () => {
@@ -442,18 +456,25 @@ function SyncTab() {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn-primary" onClick={handlePush}
-            disabled={pushing || syncState === 'syncing'}
-            style={{ padding: '10px 22px', fontSize: 14, gap: 8 }}>
-            {pushing ? <><Spinner size={14} /> Saving…</> : '☁️ Save to Drive now'}
+        {syncState === 'no_drive' ? (
+          <button className="btn-primary" onClick={handleConnect} disabled={connecting}
+            style={{ padding: '11px 24px', fontSize: 14, gap: 8 }}>
+            {connecting ? <><Spinner size={14} /> Connecting…</> : '🔗 Connect Google Drive'}
           </button>
-          <button className="btn-secondary" onClick={handlePull}
-            disabled={pulling || syncState === 'syncing'}
-            style={{ padding: '10px 22px', fontSize: 14, gap: 8 }}>
-            {pulling ? <><Spinner size={14} /> Restoring…</> : '⬇ Restore from Drive'}
-          </button>
-        </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn-primary" onClick={handlePush}
+              disabled={pushing || syncState === 'syncing'}
+              style={{ padding: '10px 22px', fontSize: 14, gap: 8 }}>
+              {pushing ? <><Spinner size={14} /> Saving…</> : '☁️ Save to Drive now'}
+            </button>
+            <button className="btn-secondary" onClick={handlePull}
+              disabled={pulling || syncState === 'syncing'}
+              style={{ padding: '10px 22px', fontSize: 14, gap: 8 }}>
+              {pulling ? <><Spinner size={14} /> Restoring…</> : '⬇ Restore from Drive'}
+            </button>
+          </div>
+        )}
       </SectionCard>
 
       <SectionCard title="Batch Lifecycle" subtitle="Automatically ends memberships and deactivates members when a batch's end date passes">

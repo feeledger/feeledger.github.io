@@ -18,32 +18,28 @@ interface SyncContextValue {
   errorMessage: string | null;
   pendingCount: number;
   hasPendingChanges: boolean;
-  /**
-   * True once the app has attempted (successfully or not) its first Drive
-   * check for the current sign-in. Screens that decide "does this account
-   * already have data in Drive?" (e.g. onboarding routing) should wait for
-   * this before deciding, so a new device doesn't jump to onboarding before
-   * we've had a chance to check whether the account is already set up.
-   */
   initialSyncAttempted: boolean;
   push: () => Promise<void>;
-  pull: () => Promise<void>;
+  pull: () => Promise<{ restored: boolean } | undefined>;
   syncNow: () => Promise<void>;
   enqueuePush: () => void;
+  /**
+   * Explicit, user-initiated "Connect Google Drive" action. Forces a visible
+   * consent dialog (never silently no-ops), then immediately checks Drive
+   * for existing data and, if none is found, pushes current local data so
+   * the FeeLedger folder is created in Drive right away.
+   */
+  connectDrive: () => Promise<boolean>;
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null);
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const AUTO_SYNC_INTERVAL_MS   = 5 * 60 * 1000;  // 5 min auto-push
-const DEBOUNCE_MS             = 3_000;           // coalesce rapid changes
-const MAX_RETRY_DELAY_MS      = 30_000;          // cap exponential backoff
-// If Drive access can't be resolved (no popup shown, no callback fired) within
-// this window, stop blocking dependent UI (e.g. onboarding routing) on it.
+const AUTO_SYNC_INTERVAL_MS   = 5 * 60 * 1000;
+const DEBOUNCE_MS             = 3_000;
+const MAX_RETRY_DELAY_MS      = 30_000;
 const INITIAL_SYNC_TIMEOUT_MS = 8_000;
-
-// ── Exponential backoff ───────────────────────────────────────────────────────
 
 function retryDelay(attempt: number): number {
   const delay = SYNC_RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
@@ -53,7 +49,7 @@ function retryDelay(attempt: number): number {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, hasDriveAccess, ensureFreshToken, requestDriveAccess } = useAuth();
+  const { isAuthenticated, ensureFreshToken, connectDriveInteractive } = useAuth();
 
   const [syncState, setSyncState]       = useState<SyncState>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -68,15 +64,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const offlineQueueRef = useRef<boolean>(false);
   const initialSyncStartedRef = useRef(false);
 
-  // ── Load last sync time on mount ─────────────────────────────────────────────
-
   useEffect(() => {
     driveMetaRepository.get().then(meta => {
       if (meta.lastRemoteSyncAt) setLastSyncedAt(meta.lastRemoteSyncAt);
     });
   }, []);
-
-  // ── Online / offline detection ────────────────────────────────────────────────
 
   useEffect(() => {
     const handleOffline = () => setSyncState('offline');
@@ -97,8 +89,6 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Update pending count periodically ────────────────────────────────────────
-
   useEffect(() => {
     const refresh = () => {
       syncRepository.getPendingCount().then(setPendingCount).catch(() => {});
@@ -108,11 +98,16 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // ── Core push with retry ──────────────────────────────────────────────────────
+  // ── Core push ──────────────────────────────────────────────────────────────
+  // Always asks ensureFreshToken() for a usable token — never pre-gates on a
+  // `hasDriveAccess` flag. A previous version gated this check BEFORE ever
+  // calling ensureFreshToken(), which meant Drive access could never be
+  // acquired in the first place for users who signed in via One Tap (the
+  // default path) — the entire sync pipeline was silently a no-op. Do not
+  // reintroduce a pre-check like that here.
 
   const doPush = useCallback(async () => {
     if (syncingRef.current) return;
-    if (!hasDriveAccess) { setSyncState('no_drive'); return; }
     if (!navigator.onLine) {
       setSyncState('offline');
       offlineQueueRef.current = true;
@@ -130,10 +125,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       try {
         await pushAllToDrive(token);
       } catch (err) {
-        // Token expired mid-flight (rare, but the buffer isn't a hard guarantee
-        // under clock drift/slow requests) — refresh once and retry exactly once.
         if (err instanceof DriveAPIError && err.code === 401) {
-          const freshToken = await requestDriveAccess().then(ok => ok ? ensureFreshToken() : null);
+          const freshToken = await ensureFreshToken();
           if (!freshToken) throw err;
           await pushAllToDrive(freshToken);
         } else {
@@ -168,15 +161,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       syncingRef.current = false;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasDriveAccess, retryAttempt, ensureFreshToken, requestDriveAccess]);
-
-  // ── Public push — debounced to coalesce rapid saves ───────────────────────────
+  }, [retryAttempt, ensureFreshToken]);
 
   const push = useCallback(async () => {
     await doPush();
   }, [doPush]);
-
-  // ── Enqueue push (debounced) — called after each local write ──────────────────
 
   const enqueuePush = useCallback(() => {
     if (!navigator.onLine) {
@@ -191,11 +180,15 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     }, DEBOUNCE_MS);
   }, [doPush]);
 
-  // ── Pull (Drive → local) ──────────────────────────────────────────────────────
+  // ── Pull ───────────────────────────────────────────────────────────────────
+  // Same principle: never pre-gate on hasDriveAccess.
+
+  const markInitialSyncDone = useCallback(() => {
+    setInitialSyncAttempted(true);
+  }, []);
 
   const pull = useCallback(async () => {
     if (syncingRef.current) return;
-    if (!hasDriveAccess) { setSyncState('no_drive'); markInitialSyncDone(); return; }
     if (!navigator.onLine) { setSyncState('offline'); markInitialSyncDone(); return; }
 
     const token = await ensureFreshToken();
@@ -211,7 +204,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         result = await pullAllFromDrive(token);
       } catch (err) {
         if (err instanceof DriveAPIError && err.code === 401) {
-          const freshToken = await requestDriveAccess().then(ok => ok ? ensureFreshToken() : null);
+          const freshToken = await ensureFreshToken();
           if (!freshToken) throw err;
           result = await pullAllFromDrive(freshToken);
         } else {
@@ -228,63 +221,66 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new CustomEvent('fl:drive-restored'));
       }
       setTimeout(() => setSyncState(prev => prev === 'synced' ? 'idle' : prev), 3000);
+      return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Restore failed';
       setErrorMessage(msg);
       setSyncState('error');
       console.error('[FeeLedger] Sync pull error:', err);
+      return { restored: false };
     } finally {
       syncingRef.current = false;
       markInitialSyncDone();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasDriveAccess, ensureFreshToken, requestDriveAccess]);
+  }, [ensureFreshToken, markInitialSyncDone]);
 
-  // ── Initial-sync gate helpers ─────────────────────────────────────────────────
+  // ── Connect Drive — explicit user action ──────────────────────────────────
 
-  const markInitialSyncDone = useCallback(() => {
-    setInitialSyncAttempted(true);
-  }, []);
-
-  // ── Sync now — explicit user action ──────────────────────────────────────────
+  const connectDrive = useCallback(async (): Promise<boolean> => {
+    const granted = await connectDriveInteractive();
+    if (!granted) {
+      setSyncState('no_drive');
+      return false;
+    }
+    const result = await pull();
+    if (!result?.restored) {
+      await push();
+    }
+    return true;
+  }, [connectDriveInteractive, pull, push]);
 
   const syncNow = useCallback(() => push(), [push]);
 
-  // ── On sign-in: ensure Drive access, then pull once before anything else ─────
-  // This is what lets an already-onboarded account on a NEW device skip
-  // onboarding — we check Drive for existing data before any routing
-  // decision is made elsewhere in the app (see ProtectedRoute).
+  // ── On sign-in: best-effort silent initial pull ───────────────────────────
 
   useEffect(() => {
     if (!isAuthenticated) return;
     if (initialSyncStartedRef.current) return;
     initialSyncStartedRef.current = true;
 
-    // Hard timeout so a silently-failing/blocked auth popup never leaves
-    // dependent screens (onboarding routing) stuck on a loading state forever.
     const timeout = setTimeout(markInitialSyncDone, INITIAL_SYNC_TIMEOUT_MS);
-
     pull().finally(() => clearTimeout(timeout));
 
     return () => clearTimeout(timeout);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // ── Auto-push every 5 minutes ─────────────────────────────────────────────────
+  // ── Auto-push every 5 minutes ─────────────────────────────────────────────
 
   useEffect(() => {
-    if (!isAuthenticated || !hasDriveAccess) return;
+    if (!isAuthenticated) return;
     const interval = setInterval(() => {
       if (navigator.onLine && !syncingRef.current) doPush();
     }, AUTO_SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [isAuthenticated, hasDriveAccess, doPush]);
+  }, [isAuthenticated, doPush]);
 
-  // ── Page visibility: push when tab becomes visible after being hidden ─────────
+  // ── Page visibility ────────────────────────────────────────────────────────
 
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine && hasDriveAccess) {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
         const sinceSync = lastSyncedAt
           ? Date.now() - new Date(lastSyncedAt).getTime()
           : Infinity;
@@ -293,9 +289,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [hasDriveAccess, lastSyncedAt, doPush]);
-
-  // ── Cleanup timers on unmount ─────────────────────────────────────────────────
+  }, [lastSyncedAt, doPush]);
 
   useEffect(() => {
     return () => {
@@ -303,8 +297,6 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
-
-  // ── Push after onboarding completes or expired batches are processed ─────────
 
   useEffect(() => {
     const handler = () => enqueuePush();
@@ -322,7 +314,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     <SyncContext.Provider value={{
       syncState, lastSyncedAt, errorMessage,
       pendingCount, hasPendingChanges, initialSyncAttempted,
-      push, pull, syncNow, enqueuePush,
+      push, pull, syncNow, enqueuePush, connectDrive,
     }}>
       {children}
     </SyncContext.Provider>

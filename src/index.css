@@ -344,3 +344,25 @@ body { min-height: 100dvh; background-color: var(--color-canvas); }
 .privacy-check-item:hover {
   transform: translateX(2px);
 }
+
+/* ── Dashboard bottom section — fixed 2-column grid (not auto-fit) so Recent
+   Payments can reliably span both rows regardless of viewport width ── */
+.dashboard-bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+@media (min-width: 768px) {
+  .dashboard-bottom-grid {
+    grid-template-columns: 1.3fr 1fr;
+  }
+}
+
+.dashboard-recent-payments-tall {
+  grid-row: span 1;
+}
+@media (min-width: 768px) {
+  .dashboard-recent-payments-tall {
+    grid-row: span 2;
+  }
+}

@@ -22,6 +22,14 @@ interface AuthContextValue extends AuthState {
   signOut: () => void;
   requestDriveAccess: () => Promise<boolean>;
   /**
+   * Same as requestDriveAccess, but forces Google to show a visible consent
+   * dialog every time (prompt: 'consent'), rather than attempting a silent
+   * grant first. Use this for direct, explicit user actions like a "Connect
+   * Drive" button click, where we want a guaranteed, visible outcome instead
+   * of a request that might silently no-op.
+   */
+  connectDriveInteractive: () => Promise<boolean>;
+  /**
    * Returns a Drive access token guaranteed to be valid for at least a
    * couple more minutes, refreshing it silently first if the current one
    * is missing, expired, or about to expire. Returns null if no token
@@ -330,6 +338,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [clientId]);
 
+  // ── Connect Drive — explicit user action, guarantees visible consent UI ──
+
+  const connectDriveInteractive = useCallback((): Promise<boolean> => {
+    if (!clientId || !window.google) {
+      const mockToken = 'dev_token_mock';
+      const expiresAt = Date.now() + DEFAULT_TOKEN_LIFETIME_S * 1000;
+      STORAGE.setItem(SESSION_TOKEN_KEY, mockToken);
+      STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
+      setState(s => ({ ...s, accessToken: mockToken, tokenExpiresAt: expiresAt, hasDriveAccess: true }));
+      return Promise.resolve(true);
+    }
+
+    return new Promise((resolve) => {
+      const tc = window.google!.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.file',
+        callback: (resp: GoogleTokenResponse) => {
+          if (resp.error || !resp.access_token) {
+            resolve(false);
+            return;
+          }
+          const expiresAt = Date.now() + (resp.expires_in ?? DEFAULT_TOKEN_LIFETIME_S) * 1000;
+          STORAGE.setItem(SESSION_TOKEN_KEY, resp.access_token);
+          STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
+          setState(s => ({
+            ...s,
+            accessToken: resp.access_token,
+            tokenExpiresAt: expiresAt,
+            hasDriveAccess: true,
+          }));
+          resolve(true);
+        },
+      });
+      // Explicit user action (a real click) — force a visible consent
+      // dialog every time, so the outcome is never ambiguous.
+      tc.requestAccessToken({ prompt: 'consent' });
+    });
+  }, [clientId]);
+
   // ── Ensure a fresh token — the function nearly everything should call ────
 
   const ensureFreshToken = useCallback((): Promise<string | null> => {
@@ -380,7 +427,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...state, signIn, signOut, requestDriveAccess, ensureFreshToken }}
+      value={{ ...state, signIn, signOut, requestDriveAccess, connectDriveInteractive, ensureFreshToken }}
     >
       {children}
     </AuthContext.Provider>
