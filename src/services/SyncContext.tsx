@@ -144,18 +144,29 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       await syncRepository.clearCompleted();
 
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Sync failed';
-      setErrorMessage(msg);
-      setSyncState('error');
       console.error('[FeeLedger] Sync push error:', err);
 
-      const attempt = retryAttempt;
-      if (attempt < SYNC_RETRY_MAX) {
-        const delay = retryDelay(attempt);
-        setRetryAttempt(a => a + 1);
-        retryTimerRef.current = setTimeout(() => {
-          if (navigator.onLine) doPush();
-        }, delay);
+      if (err instanceof DriveAPIError && err.code === 401) {
+        // The token was refused even after ensureFreshToken()'s own retry —
+        // Drive access needs a real reconnect (a tap), not another silent
+        // background retry that will just fail the same way. "no_drive"
+        // already renders the friendly "Connect Drive" button, wired to the
+        // redirect-capable connectDriveInteractive() for standalone PWAs.
+        setErrorMessage(null);
+        setSyncState('no_drive');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Sync failed';
+        setErrorMessage(msg);
+        setSyncState('error');
+
+        const attempt = retryAttempt;
+        if (attempt < SYNC_RETRY_MAX) {
+          const delay = retryDelay(attempt);
+          setRetryAttempt(a => a + 1);
+          retryTimerRef.current = setTimeout(() => {
+            if (navigator.onLine) doPush();
+          }, delay);
+        }
       }
     } finally {
       syncingRef.current = false;
@@ -223,10 +234,16 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setTimeout(() => setSyncState(prev => prev === 'synced' ? 'idle' : prev), 3000);
       return result;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Restore failed';
-      setErrorMessage(msg);
-      setSyncState('error');
       console.error('[FeeLedger] Sync pull error:', err);
+
+      if (err instanceof DriveAPIError && err.code === 401) {
+        setErrorMessage(null);
+        setSyncState('no_drive');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Restore failed';
+        setErrorMessage(msg);
+        setSyncState('error');
+      }
       return { restored: false };
     } finally {
       syncingRef.current = false;

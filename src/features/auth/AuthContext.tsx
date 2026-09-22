@@ -122,6 +122,74 @@ function isTokenValid(expiresAt: number | null): boolean {
   return !!expiresAt && Date.now() < expiresAt - REFRESH_BUFFER_MS;
 }
 
+// ── Standalone-PWA reauth (redirect-based) ───────────────────────────────
+//
+// `requestDriveAndIdentify`, `requestDriveAccess` and `connectDriveInteractive`
+// (below) all use Google's popup-based OAuth2 token client. That works fine
+// in a normal browser tab, but when FeeLedger is installed and launched as a
+// standalone PWA on Android, the popup it opens loses its `window.opener`
+// link back to this page, so the token callback never fires — this is what
+// caused "Sync now" to do nothing, and silent background refreshes to fail
+// after the ~1hr access token expired. There's no refresh token available in
+// a backend-less app, so once the token expires, some kind of fresh round
+// trip to Google is unavoidable — we just do it via a full-page redirect
+// instead of a popup when running standalone, since redirects aren't subject
+// to the same opener restrictions.
+
+const OAUTH_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
+const OAUTH_REDIRECT_STATE = 'feeledger_auth';
+const OAUTH_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/drive.file',
+].join(' ');
+
+function isStandalonePWA(): boolean {
+  try {
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+    if (window.matchMedia && window.matchMedia('(display-mode: minimal-ui)').matches) return true;
+    // iOS "Add to Home Screen" flag — harmless to also check here.
+    return (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Navigate the whole page to Google's OAuth authorize endpoint and come
+ * straight back to the app with the token in the URL fragment. Used only in
+ * standalone-PWA mode, and only from a real user tap (so the navigation
+ * feels expected rather than surprising).
+ */
+function beginRedirectAuth(clientId: string, promptMode?: 'consent', loginHint?: string) {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: `${window.location.origin}/`,
+    response_type: 'token',
+    scope: OAUTH_SCOPES,
+    include_granted_scopes: 'true',
+    state: OAUTH_REDIRECT_STATE,
+  });
+  if (promptMode) params.set('prompt', promptMode);
+  if (loginHint) params.set('login_hint', loginHint);
+  window.location.assign(`${OAUTH_AUTH_ENDPOINT}?${params.toString()}`);
+}
+
+/** Resolves to `fallback` if `promise` hasn't settled within `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; resolve(fallback); }
+    }, ms);
+    promise.then(
+      (value) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } },
+      () => { if (!settled) { settled = true; clearTimeout(timer); resolve(fallback); } },
+    );
+  });
+}
+
 // ── Context ──────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -142,9 +210,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // instead of firing multiple simultaneous token requests.
   const refreshInFlightRef = useRef<Promise<string | null> | null>(null);
 
+  // Applies a token obtained via the standalone-PWA redirect flow: persists
+  // it, fetches the identity, and marks the session authenticated with
+  // Drive access. Shared by the redirect-return handler below.
+  const applyTokenResponse = useCallback(async (accessToken: string, expiresAt: number) => {
+    STORAGE.setItem(SESSION_TOKEN_KEY, accessToken);
+    STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
+    try {
+      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const info = await res.json() as { sub: string; email: string; name: string; picture: string };
+      const now = new Date().toISOString();
+      const user: AppUser = {
+        id: info.sub,
+        googleSubjectId: info.sub,
+        email: info.email,
+        displayName: info.name,
+        photoUrl: info.picture,
+        createdAt: now,
+        updatedAt: now,
+      };
+      STORAGE.setItem(SESSION_USER_KEY, JSON.stringify(user));
+      setState(s => ({
+        ...s, user, isAuthenticated: true, isLoading: false,
+        accessToken, tokenExpiresAt: expiresAt, hasDriveAccess: true,
+      }));
+    } catch {
+      // Identity fetch failed but the Drive token itself is good — keep
+      // whichever user record is already in storage (if any) and proceed.
+      setState(s => ({
+        ...s, isAuthenticated: true, isLoading: false,
+        accessToken, tokenExpiresAt: expiresAt, hasDriveAccess: true,
+      }));
+    }
+  }, []);
+
   // ── Restore session on mount ─────────────────────────────────────────────
 
   useEffect(() => {
+    // Returning from a standalone-PWA redirect reauth (see beginRedirectAuth
+    // above)? The token comes back in the URL fragment rather than a popup
+    // callback.
+    const hash = window.location.hash;
+    if (hash.includes(`state=${OAUTH_REDIRECT_STATE}`)) {
+      const params = new URLSearchParams(hash.replace(/^#/, ''));
+      // Strip the fragment immediately so a later refresh can't reprocess it.
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      const accessToken = params.get('access_token');
+      const expiresIn = params.get('expires_in');
+      if (accessToken) {
+        const expiresAt = Date.now() + (expiresIn ? Number(expiresIn) : DEFAULT_TOKEN_LIFETIME_S) * 1000;
+        applyTokenResponse(accessToken, expiresAt);
+        return;
+      }
+      // Otherwise params.get('error') is set (e.g. access_denied) — fall
+      // through to the normal storage-restore path below.
+    }
+
     try {
       const raw = STORAGE.getItem(SESSION_USER_KEY);
       const tok = STORAGE.getItem(SESSION_TOKEN_KEY);
@@ -171,6 +295,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch { /* ignore */ }
     setState(s => ({ ...s, isLoading: false }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Wait for GIS script then initialise ─────────────────────────────────
@@ -216,7 +341,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Sign in ──────────────────────────────────────────────────────────────
 
   const signIn = useCallback(() => {
-    if (!clientId || !state.gisReady) {
+    const signInAsMockDevUser = () => {
       const mock: AppUser = {
         id: 'dev_user_01',
         email: 'dev@feeledger.app',
@@ -226,6 +351,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
       STORAGE.setItem(SESSION_USER_KEY, JSON.stringify(mock));
       setState(s => ({ ...s, user: mock, isAuthenticated: true, isLoading: false }));
+    };
+
+    if (!clientId) {
+      signInAsMockDevUser();
+      return;
+    }
+
+    // Google's One Tap / popup flows don't reliably work from an installed
+    // PWA's standalone window on Android (see the standalone-PWA reauth
+    // section above) — go straight to a full-page redirect instead.
+    if (isStandalonePWA()) {
+      beginRedirectAuth(clientId);
+      return;
+    }
+
+    if (!state.gisReady) {
+      signInAsMockDevUser();
       return;
     }
 
@@ -311,6 +453,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return Promise.resolve(true);
     }
 
+    if (isStandalonePWA()) {
+      // A popup-based silent refresh can't complete from a standalone PWA
+      // window (see note above) — don't attempt it from this non-gesture
+      // context. Callers fall back to the "no_drive" / "Connect Drive"
+      // state, whose action button calls connectDriveInteractive(), which
+      // uses a redirect and works from a real tap.
+      return Promise.resolve(false);
+    }
+
     return new Promise((resolve) => {
       const tc = window.google!.accounts.oauth2.initTokenClient({
         client_id: clientId,
@@ -338,7 +489,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [clientId]);
 
-  // ── Connect Drive — explicit user action, guarantees visible consent UI ──
+  // ── Connect Drive — explicit user action, guarantees a visible outcome ───
 
   const connectDriveInteractive = useCallback((): Promise<boolean> => {
     if (!clientId || !window.google) {
@@ -348,6 +499,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       STORAGE.setItem(TOKEN_EXPIRES_KEY, String(expiresAt));
       setState(s => ({ ...s, accessToken: mockToken, tokenExpiresAt: expiresAt, hasDriveAccess: true }));
       return Promise.resolve(true);
+    }
+
+    if (isStandalonePWA()) {
+      return new Promise((resolve) => {
+        try {
+          // Deliberately no `prompt: 'consent'` here (unlike the popup path
+          // below) — for a returning, already-consented user this lets
+          // Google skip straight back with a fresh token instead of forcing
+          // the full permission screen every time the app needs to
+          // reconnect. First-time users still see the normal picker/consent
+          // screen since nothing has been granted yet.
+          beginRedirectAuth(clientId, undefined, state.user?.email);
+        } catch {
+          resolve(false);
+          return;
+        }
+        // We should already be navigating away — this only fires if that
+        // somehow didn't happen, so the caller isn't left stuck forever.
+        setTimeout(() => resolve(false), 8000);
+      });
     }
 
     return new Promise((resolve) => {
@@ -375,7 +546,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // dialog every time, so the outcome is never ambiguous.
       tc.requestAccessToken({ prompt: 'consent' });
     });
-  }, [clientId]);
+  }, [clientId, state.user]);
 
   // ── Ensure a fresh token — the function nearly everything should call ────
 
@@ -394,7 +565,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Share one in-flight refresh across concurrent callers
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
 
-    const refreshPromise = requestDriveAccess()
+    // Bound the wait: if a popup silently fails to open/complete (blocked,
+    // or an opener-less standalone-PWA window), don't let this hang forever
+    // and wedge every future call behind the same stuck promise.
+    const refreshPromise = withTimeout(requestDriveAccess(), 15000, false)
       .then(granted => (granted ? STORAGE.getItem(SESSION_TOKEN_KEY) : null))
       .finally(() => { refreshInFlightRef.current = null; });
 
