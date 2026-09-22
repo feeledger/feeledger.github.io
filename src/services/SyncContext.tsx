@@ -49,7 +49,7 @@ function retryDelay(attempt: number): number {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, ensureFreshToken, connectDriveInteractive } = useAuth();
+  const { isAuthenticated, ensureFreshToken, connectDriveInteractive, attemptSilentReconnect } = useAuth();
 
   const [syncState, setSyncState]       = useState<SyncState>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -276,6 +276,13 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     if (initialSyncStartedRef.current) return;
     initialSyncStartedRef.current = true;
 
+    // App just opened. If the token expired while this was a backgrounded
+    // standalone PWA, try to silently restore it before anything else —
+    // this is what makes reconnecting automatic instead of requiring a
+    // manual "Sync now" tap after a long gap. If it starts a redirect, the
+    // page is about to unload, so there's nothing further to do here.
+    if (attemptSilentReconnect()) return;
+
     const timeout = setTimeout(markInitialSyncDone, INITIAL_SYNC_TIMEOUT_MS);
     pull().finally(() => clearTimeout(timeout));
 
@@ -298,6 +305,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
+        // Resuming from the background is the other "app opened" moment —
+        // same silent-reconnect-first treatment as the initial mount above.
+        if (attemptSilentReconnect()) return;
+
         const sinceSync = lastSyncedAt
           ? Date.now() - new Date(lastSyncedAt).getTime()
           : Infinity;
@@ -306,7 +317,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [lastSyncedAt, doPush]);
+  }, [lastSyncedAt, doPush, attemptSilentReconnect]);
 
   useEffect(() => {
     return () => {

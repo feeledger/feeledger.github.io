@@ -30,6 +30,16 @@ interface AuthContextValue extends AuthState {
    */
   connectDriveInteractive: () => Promise<boolean>;
   /**
+   * Standalone-PWA only: if the token has expired and we have a prior
+   * session to silently restore, starts a redirect-based reconnect and
+   * returns true (caller should stop — the page is about to unload).
+   * Returns false if there's nothing to do (token still valid, not
+   * standalone, no prior session, or already tried once this tab session).
+   * Intended only for "app opened/resumed" moments — see the function's
+   * own comment for why it's not wired into every token check.
+   */
+  attemptSilentReconnect: () => boolean;
+  /**
    * Returns a Drive access token guaranteed to be valid for at least a
    * couple more minutes, refreshing it silently first if the current one
    * is missing, expired, or about to expire. Returns null if no token
@@ -138,6 +148,11 @@ function isTokenValid(expiresAt: number | null): boolean {
 
 const OAUTH_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const OAUTH_REDIRECT_STATE = 'feeledger_auth';
+// Set right before an *automatic* (non-tap) silent reconnect redirect, so we
+// only ever attempt one per tab session — if it comes back with an error
+// (session truly gone / revoked), we don't redirect-loop, we just fall back
+// to the manual "Connect Drive" button.
+const AUTO_REAUTH_GUARD_KEY = 'fl_auto_reauth_attempted';
 const OAUTH_SCOPES = [
   'openid',
   'email',
@@ -162,7 +177,7 @@ function isStandalonePWA(): boolean {
  * standalone-PWA mode, and only from a real user tap (so the navigation
  * feels expected rather than surprising).
  */
-function beginRedirectAuth(clientId: string, promptMode?: 'consent', loginHint?: string) {
+function beginRedirectAuth(clientId: string, promptMode?: 'none' | 'consent', loginHint?: string) {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: `${window.location.origin}/`,
@@ -232,6 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         updatedAt: now,
       };
       STORAGE.setItem(SESSION_USER_KEY, JSON.stringify(user));
+      sessionStorage.removeItem(AUTO_REAUTH_GUARD_KEY);
       setState(s => ({
         ...s, user, isAuthenticated: true, isLoading: false,
         accessToken, tokenExpiresAt: expiresAt, hasDriveAccess: true,
@@ -239,6 +255,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Identity fetch failed but the Drive token itself is good — keep
       // whichever user record is already in storage (if any) and proceed.
+      sessionStorage.removeItem(AUTO_REAUTH_GUARD_KEY);
       setState(s => ({
         ...s, isAuthenticated: true, isLoading: false,
         accessToken, tokenExpiresAt: expiresAt, hasDriveAccess: true,
@@ -548,6 +565,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [clientId, state.user]);
 
+  // ── Attempt one automatic, silent reconnect (standalone "app opened" case) ─
+  //
+  // Called right when the app is opened or resumed from the background,
+  // before it tries to sync. If the token expired while the standalone PWA
+  // was backgrounded, this proactively starts the redirect-based reauth
+  // instead of waiting for the user to notice and tap "Connect Drive"
+  // themselves. Deliberately NOT wired into ensureFreshToken/requestDriveAccess
+  // (called from the 5-min background timer too) — redirecting the whole app
+  // away mid-interaction would be jarring; only "app open" moments do this.
+  // Runs at most once per tab session (AUTO_REAUTH_GUARD_KEY) so a session
+  // that's truly gone (revoked, signed out elsewhere) falls back to the
+  // manual button instead of redirect-looping. Returns true if a redirect
+  // was started (caller should stop, since the page is about to unload).
+
+  const attemptSilentReconnect = useCallback((): boolean => {
+    if (!clientId || !isStandalonePWA()) return false;
+    if (sessionStorage.getItem(AUTO_REAUTH_GUARD_KEY)) return false;
+
+    const tok = STORAGE.getItem(SESSION_TOKEN_KEY);
+    const expiresRaw = STORAGE.getItem(TOKEN_EXPIRES_KEY);
+    const expiresAt = expiresRaw ? Number(expiresRaw) : null;
+    if (tok && isTokenValid(expiresAt)) return false; // nothing to do
+
+    const storedUserRaw = STORAGE.getItem(SESSION_USER_KEY);
+    if (!storedUserRaw) return false; // never signed in — nothing to silently restore
+
+    let email: string | undefined;
+    try { email = (JSON.parse(storedUserRaw) as AppUser).email; } catch { /* ignore */ }
+
+    sessionStorage.setItem(AUTO_REAUTH_GUARD_KEY, '1');
+    beginRedirectAuth(clientId, 'none', email);
+    return true;
+  }, [clientId]);
+
   // ── Ensure a fresh token — the function nearly everything should call ────
 
   const ensureFreshToken = useCallback((): Promise<string | null> => {
@@ -601,7 +652,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...state, signIn, signOut, requestDriveAccess, connectDriveInteractive, ensureFreshToken }}
+      value={{
+        ...state, signIn, signOut, requestDriveAccess,
+        connectDriveInteractive, attemptSilentReconnect, ensureFreshToken,
+      }}
     >
       {children}
     </AuthContext.Provider>
