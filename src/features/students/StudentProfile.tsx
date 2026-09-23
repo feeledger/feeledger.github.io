@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useStudent, useStudentFields, usePayments, useAllBatches, useSettings } from '../../hooks/useDB';
 import { Badge, Spinner, EmptyState, SectionCard } from '../../components/ui/index';
 import type { StudentFieldDefinition } from '../../types';
+import { calculateFeeDue } from '../../utils/fees';
+import { getSavedWaTemplate } from '../../utils/whatsappTemplate';
 
 interface StudentProfileProps {
   studentId: string;
@@ -59,47 +61,35 @@ export function StudentProfile({ studentId, onEdit, onBack }: StudentProfileProp
   const activeBatchIds = student.batchMemberships.filter(m => m.status === 'active').map(m => m.batchId);
   const activeBatchNames = activeBatchIds.map(id => batches?.find(b => b.id === id)?.name ?? id);
 
-  const totalPaid = (payments ?? []).reduce((sum, p) => sum + p.amount, 0);
+  // Total Due / Total Paid, calculated together from fee_amount + fee_type +
+  // fee_frequency and this member's actual payments — see utils/fees.ts.
+  const feeDue = calculateFeeDue(student, payments ?? []);
+  const totalPaid = feeDue.totalPaid;
   const lastPayment = payments && payments.length > 0 ? payments[0] : null;
 
-  const waTemplate = localStorage.getItem('fl_wa_template') ?? `Hi {{name}}, your fee is due. Total paid so far: {{amount}}. Please contact us for details.\n\n— {{business_name}}`;
   const businessName = settings?.business.businessName ?? 'FeeLedger';
 
   const handleWhatsApp = () => {
     if (!whatsappNum) return;
-    const feeAmount   = Number(student.values['fee_amount'] ?? 0);
-    // fee_type is a boolean now: unchecked/false (default) = Total Fee Due,
-    // checked/true = a recurring amount charged at the frequency below.
-    const isRecurring = Boolean(student.values['fee_type']);
-    const feeFreq     = String(student.values['fee_frequency'] ?? '');
-    const dueDay      = String(student.values['fee_due_date'] ?? '');
-
-    // Build frequency label
-    const freqLabels: Record<string, string> = {
-      monthly: 'monthly', quarterly: 'quarterly', halfYearly: 'half-yearly',
-      yearly: 'annually', oneTime: 'one-time', instalment2: 'in 2 instalments',
-      instalment3: 'in 3 instalments', custom: 'as per agreed schedule',
-    };
-    const freqLabel = freqLabels[feeFreq] ?? feeFreq;
-
-    // Build amount description based on fee_type
-    let amountDesc = '';
-    if (feeAmount > 0) {
-      if (isRecurring) {
-        amountDesc = `${formatAmount(feeAmount, currency)} ${freqLabel}`;
-      } else {
-        amountDesc = `${formatAmount(feeAmount, currency)} (total course fees, payable ${freqLabel})`;
-      }
-    }
+    const dueDay = String(student.values['fee_due_date'] ?? '');
 
     // Build due date string
     const dueDateStr = dueDay
       ? `the ${dueDay}${['1','21','31'].includes(dueDay) ? 'st' : ['2','22'].includes(dueDay) ? 'nd' : ['3','23'].includes(dueDay) ? 'rd' : 'th'} of every month`
       : '—';
 
-    const msg = waTemplate
+    const totalDueStr  = formatAmount(feeDue.totalDue, currency);
+    const totalPaidStr = formatAmount(feeDue.totalPaid, currency);
+
+    // Pulls the template saved in Settings → WhatsApp (or its default, if
+    // nothing has been saved yet) and fills it with this member's actual
+    // total paid / total due, worked out from fee_amount + fee_type +
+    // fee_frequency together.
+    const msg = getSavedWaTemplate()
       .replace(/{{name}}/g, studentName)
-      .replace(/{{amount}}/g, amountDesc || '—')
+      .replace(/{{total_due}}/g, totalDueStr)
+      .replace(/{{total_paid}}/g, totalPaidStr)
+      .replace(/{{amount}}/g, totalDueStr) // kept working for templates saved before this update
       .replace(/{{period}}/g, new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' }))
       .replace(/{{due_date}}/g, dueDateStr)
       .replace(/{{business_name}}/g, businessName);
@@ -171,10 +161,10 @@ export function StudentProfile({ studentId, onEdit, onBack }: StudentProfileProp
       {/* Fee summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         {[
-          { label: 'Total Paid',    value: formatAmount(totalPaid, currency) },
-          { label: 'Payments',      value: String(payments?.length ?? 0) },
-          { label: 'Last Payment',  value: lastPayment ? formatDate(lastPayment.paymentDate) : '—' },
-          { label: 'Last Amount',   value: lastPayment ? formatAmount(lastPayment.amount, currency) : '—' },
+          { label: 'Total Due',               value: formatAmount(feeDue.totalDue, currency) },
+          { label: 'Number of Payments',      value: String(payments?.length ?? 0) },
+          { label: 'Last Payment',            value: lastPayment ? formatDate(lastPayment.paymentDate) : '—' },
+          { label: 'Total Payment Made',      value: formatAmount(totalPaid, currency) },
         ].map(stat => (
           <div key={stat.label} style={{
             background: 'var(--color-white)', border: '1px solid var(--color-dust)',

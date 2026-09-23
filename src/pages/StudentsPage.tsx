@@ -1,10 +1,11 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useStudents, useStudentFields, useAllBatches, useSettings } from '../hooks/useDB';
+import { useStudents, useStudentFields, useAllBatches, useSettings, usePayments } from '../hooks/useDB';
 import { studentRepository } from '../db/repositories/studentRepository';
 import { StudentForm } from '../features/students/StudentForm';
 import { StudentProfile } from '../features/students/StudentProfile';
 import { PageHeader, EmptyState, Spinner, Modal } from '../components/ui/index';
-import type { Student } from '../types';
+import { calculateFeeDue } from '../utils/fees';
+import type { Student, Payment } from '../types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -110,16 +111,30 @@ export function StudentsPage() {
   const { data: fields } = useStudentFields();
   const { data: batches } = useAllBatches();
   const { data: settings } = useSettings();
+  const { data: allPayments } = usePayments();
 
   const [mode, setMode]               = useState<PanelMode>('list');
   const [selectedId, setSelectedId]   = useState<string | null>(null);
   const [search, setSearch]           = useState('');
   const [filterBatch, setFilterBatch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterHasDue, setFilterHasDue] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<Student | null>(null);
   const [archiving, setArchiving] = useState(false);
 
   const currency = settings?.defaultCurrency ?? 'INR';
+
+  // Payments grouped by member, so "has due" can be worked out per member
+  // without a separate query for each row.
+  const paymentsByStudent = useMemo(() => {
+    const map = new Map<string, Payment[]>();
+    for (const p of allPayments ?? []) {
+      const arr = map.get(p.studentId);
+      if (arr) arr.push(p);
+      else map.set(p.studentId, [p]);
+    }
+    return map;
+  }, [allPayments]);
 
   // Fields to show in the list view
   const listFields = useMemo(() =>
@@ -147,6 +162,13 @@ export function StudentsPage() {
       );
     }
 
+    if (filterHasDue) {
+      list = list.filter(s =>
+        String(s.values['student_status'] ?? 'active') === 'active' &&
+        calculateFeeDue(s, paymentsByStudent.get(s.id) ?? []).totalDue > 0
+      );
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(s =>
@@ -156,7 +178,7 @@ export function StudentsPage() {
     }
 
     return list;
-  }, [students, search, filterBatch, filterStatus, searchableIds]);
+  }, [students, search, filterBatch, filterStatus, filterHasDue, searchableIds, paymentsByStudent]);
 
   const getBatchNames = useCallback((student: Student) =>
     student.batchMemberships
@@ -314,6 +336,22 @@ export function StudentsPage() {
           <option value="inactive">Inactive</option>
           <option value="completed">Completed</option>
         </select>
+
+        <button
+          onClick={() => setFilterHasDue(v => !v)}
+          title="Active members with an outstanding amount due"
+          style={{
+            flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6,
+            padding: '10px 16px',
+            border: `1.5px solid ${filterHasDue ? 'var(--color-ink)' : 'var(--color-dust)'}`,
+            borderRadius: 12, cursor: 'pointer',
+            fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 600,
+            background: filterHasDue ? 'var(--color-ink)' : 'var(--color-white)',
+            color: filterHasDue ? 'var(--color-canvas)' : 'var(--color-ink)',
+          }}
+        >
+          💰 Active + Has Due
+        </button>
       </div>
 
       {/* Results */}
@@ -321,14 +359,14 @@ export function StudentsPage() {
         <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spinner size={32} /></div>
       ) : filtered.length === 0 ? (
         <EmptyState
-          emoji={search || filterBatch || filterStatus ? '🔍' : '🧑‍🎓'}
-          title={search || filterBatch || filterStatus ? 'No members found' : 'No members yet'}
-          body={search || filterBatch || filterStatus
+          emoji={search || filterBatch || filterStatus || filterHasDue ? '🔍' : '🧑‍🎓'}
+          title={search || filterBatch || filterStatus || filterHasDue ? 'No members found' : 'No members yet'}
+          body={search || filterBatch || filterStatus || filterHasDue
             ? 'Try a different search term or filter.'
             : 'Add your first member to get started.'
           }
           action={
-            !search && !filterBatch && !filterStatus
+            !search && !filterBatch && !filterStatus && !filterHasDue
               ? <button className="btn-primary" onClick={() => setMode('add')} style={{ padding: '10px 20px' }}>+ Add Member</button>
               : undefined
           }

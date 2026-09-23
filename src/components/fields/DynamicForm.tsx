@@ -2,6 +2,7 @@
 import type { FieldDefinition, StudentFieldCategory } from '../../types';
 import { FieldInput } from './FieldInput';
 import { FormRow } from '../ui/index';
+import { getFrequencyLabel } from '../../utils/fees';
 
 export interface DynamicFormValues {
   [fieldId: string]: unknown;
@@ -29,6 +30,33 @@ const CATEGORY_LABELS: Record<StudentFieldCategory, string> = {
   custom:   'Custom Fields',
 };
 
+/**
+ * fee_amount, fee_type ("This is a recurring amount") and fee_frequency work
+ * together to define what a member owes — see utils/fees.ts. Show a live
+ * hint under each of the three so it's clear how they combine as the user
+ * fills them in.
+ */
+function getFeeFieldHint(fieldId: string, values: DynamicFormValues): string | undefined {
+  const isRecurring = Boolean(values['fee_type']);
+  const freq = String(values['fee_frequency'] ?? '');
+  const freqLabel = freq ? getFrequencyLabel(freq) : '';
+
+  switch (fieldId) {
+    case 'fee_amount':
+      return isRecurring
+        ? `Recurring amount — charged every cycle${freqLabel ? ` (currently ${freqLabel})` : ', set a frequency below'}.`
+        : 'Treated as the total amount due for the whole course/engagement, not a per-cycle amount.';
+    case 'fee_type':
+      return 'Turn this on if the amount above repeats at a set frequency (e.g. every month), instead of being a one-off total.';
+    case 'fee_frequency':
+      return isRecurring
+        ? 'How often the fee amount above is charged.'
+        : 'Description only — the amount above is still treated as the total due, however this is filled in.';
+    default:
+      return undefined;
+  }
+}
+
 export function DynamicForm({
   fields,
   values,
@@ -54,6 +82,7 @@ export function DynamicForm({
             key={field.id}
             label={field.label}
             required={field.required}
+            hint={getFeeFieldHint(field.id, values)}
             error={errors[field.id]}
           >
             <FieldInput
@@ -102,6 +131,7 @@ export function DynamicForm({
                   key={field.id}
                   label={field.label}
                   required={field.required}
+                  hint={getFeeFieldHint(field.id, values)}
                   error={errors[field.id]}
                 >
                   <FieldInput

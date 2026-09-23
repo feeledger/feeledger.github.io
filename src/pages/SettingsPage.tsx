@@ -8,6 +8,11 @@ import { FieldBuilder } from '../features/settings/FieldBuilder';
 import { PageHeader, SectionCard, FormRow, Spinner, Toggle } from '../components/ui/index';
 import type { AppSettings, PaymentMode } from '../types';
 import { normalizeDefaultRateIds } from '../utils/tax';
+import {
+  DEFAULT_WA_TEMPLATE as DEFAULT_TEMPLATE,
+  WA_PLACEHOLDERS as PLACEHOLDERS,
+  WA_TEMPLATE_STORAGE_KEY,
+} from '../utils/whatsappTemplate';
 
 // ── Tab system ────────────────────────────────────────────────────────────────
 
@@ -274,36 +279,22 @@ function PaymentModesTab({ settings, onPatch }: { settings: AppSettings; onPatch
 }
 
 // ── WhatsApp tab ──────────────────────────────────────────────────────────────
-
-const DEFAULT_TEMPLATE = `Hi {{name}},
-
-This is a reminder that your fee of {{amount}} for {{period}} is due on {{due_date}}.
-
-Kindly make the payment at your earliest convenience.
-
-Thank you,
-{{business_name}}`;
-
-const PLACEHOLDERS = [
-  { key: '{{name}}',          desc: 'Member name' },
-  { key: '{{amount}}',        desc: 'Fee amount with frequency (e.g. ₹4,500 monthly)' },
-  { key: '{{period}}',        desc: 'Period (e.g. September 2026)' },
-  { key: '{{due_date}}',      desc: 'Due date' },
-  { key: '{{business_name}}', desc: 'Your business name' },
-];
+// Default text and placeholder list live in src/utils/whatsappTemplate.ts so
+// the member profile's "Send WhatsApp reminder" button always matches what's
+// shown/saved here.
 
 function WhatsAppTab() {
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => {
-    localStorage.setItem('fl_wa_template', template);
+    localStorage.setItem(WA_TEMPLATE_STORAGE_KEY, template);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
   useEffect(() => {
-    const stored = localStorage.getItem('fl_wa_template');
+    const stored = localStorage.getItem(WA_TEMPLATE_STORAGE_KEY);
     if (stored) setTemplate(stored);
   }, []);
 
