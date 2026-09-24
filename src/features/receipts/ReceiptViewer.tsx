@@ -9,9 +9,21 @@ interface ReceiptViewerProps {
   onClose: () => void;
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function ReceiptViewer({ open, data, onClose }: ReceiptViewerProps) {
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded]   = useState(false);
+  const [sendingWa, setSendingWa]     = useState(false);
 
   if (!data) return null;
 
@@ -36,25 +48,63 @@ export function ReceiptViewer({ open, data, onClose }: ReceiptViewerProps) {
     }
   };
 
-  const handleWhatsApp = () => {
-    if (!waNumber) return;
-    const currency = data.settings.defaultCurrency ?? 'INR';
-    const symbol   = currency === 'INR' ? '₹' : currency;
-    const amount   = `${symbol}${data.payment.amount.toLocaleString('en-IN')}`;
-    const date     = new Date(data.payment.paymentDate).toLocaleDateString('en-IN', {
-      day: 'numeric', month: 'long', year: 'numeric',
-    });
+  const handleWhatsApp = async () => {
+    if (!waNumber || sendingWa) return;
+    setSendingWa(true);
+    try {
+      const currency = data.settings.defaultCurrency ?? 'INR';
+      const symbol   = currency === 'INR' ? '₹' : currency;
+      const amount   = `${symbol}${data.payment.amount.toLocaleString('en-IN')}`;
+      const date     = new Date(data.payment.paymentDate).toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'long', year: 'numeric',
+      });
 
-    const msg =
-      `Hi ${studentName},\n\n` +
-      `Your payment of *${amount}* has been received on ${date}.\n` +
-      `Receipt No: *${data.receipt.receiptNumber}*\n` +
-      (data.payment.purpose ? `Period: ${data.payment.purpose}\n` : '') +
-      `\nThank you!\n${data.settings.business.businessName || 'FeeLedger'}`;
+      const msg =
+        `Hi ${studentName},\n\n` +
+        `Your payment of *${amount}* has been received on ${date}.\n` +
+        `Receipt No: *${data.receipt.receiptNumber}*\n` +
+        (data.payment.purpose ? `Period: ${data.payment.purpose}\n` : '') +
+        `\nThank you!\n${data.settings.business.businessName || 'FeeLedger'}`;
 
-    const phone = waNumber.replace(/\D/g, '');
-    const url   = `https://wa.me/${phone.startsWith('91') ? phone : '91' + phone}?text=${encodeURIComponent(msg)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+      const phone     = waNumber.replace(/\D/g, '');
+      const fullPhone = phone.startsWith('91') ? phone : '91' + phone;
+
+      const { getReceiptPDFBlob } = await import('../../services/pdf/receiptPDF');
+      const blob     = await getReceiptPDFBlob(data);
+      const fileName = `${data.receipt.receiptNumber}.pdf`;
+      const file     = new File([blob], fileName, { type: 'application/pdf' });
+
+      // The Web Share API is the only browser mechanism that can hand a
+      // file straight to WhatsApp (via the device's native share sheet) —
+      // a wa.me link can only ever carry text. Use it when the platform
+      // supports sharing files.
+      if (
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: [file] })
+      ) {
+        try {
+          await navigator.share({ files: [file], text: msg });
+          return;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') return; // user cancelled
+          // otherwise fall through to the fallback below
+        }
+      }
+
+      // Fallback for browsers (mainly desktop) that can't share files:
+      // download the PDF and open WhatsApp with the text pre-filled so it
+      // can be attached to the chat manually.
+      downloadBlob(blob, fileName);
+      const url = `https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      alert('Your browser can\'t attach files to WhatsApp directly, so the receipt PDF has been downloaded — please attach it to the chat that just opened.');
+    } catch (err) {
+      console.error('WhatsApp share error:', err);
+      alert('Failed to share the receipt. Please try again.');
+    } finally {
+      setSendingWa(false);
+    }
   };
 
   return (
@@ -68,15 +118,20 @@ export function ReceiptViewer({ open, data, onClose }: ReceiptViewerProps) {
           {waNumber && (
             <button
               onClick={handleWhatsApp}
+              disabled={sendingWa}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 background: '#25D366', border: 'none', borderRadius: 'var(--radius-btn)',
-                padding: '9px 18px', cursor: 'pointer',
+                padding: '9px 18px', cursor: sendingWa ? 'default' : 'pointer',
+                opacity: sendingWa ? 0.75 : 1,
                 color: 'white', fontSize: 14, fontWeight: 600,
                 fontFamily: 'var(--font-sans)',
               }}
             >
-              <span style={{ fontSize: 16 }}>💬</span> WhatsApp
+              {sendingWa
+                ? <><Spinner size={14} /> Preparing…</>
+                : <><span style={{ fontSize: 16 }}>💬</span> WhatsApp</>
+              }
             </button>
           )}
           <div style={{ flex: 1 }} />

@@ -9,6 +9,8 @@ import { SyncStatusBar } from '../components/SyncStatusBar';
 import { Icons } from '../components/Icons';
 import { Spinner, EmptyState } from '../components/ui/index';
 import { formatYtdLabel, normalizeYtdAnchor } from '../utils/ytd';
+import { calculateFeeDue } from '../utils/fees';
+import type { Payment } from '../types';
 
 function fmt(n: number, cur = 'INR') {
   const s = cur === 'INR' ? '₹' : cur;
@@ -210,19 +212,40 @@ export function DashboardPage() {
     };
   }, [yearFilteredPayments, yearBatchIds, students, stats?.ytdStartDate]);
 
-  // Members with a "completed" batch membership — scoped to the selected
-  // academic year's batches, or across every batch under "All years".
-  const completedMembersCount = useMemo(() => {
-    const ids = new Set<string>();
-    for (const s of students ?? []) {
-      if (s.batchMemberships.some(m =>
-        m.status === 'completed' && (!yearBatchIds || yearBatchIds.has(m.batchId))
-      )) {
-        ids.add(s.id);
-      }
+  // Payments grouped by member — used to work out what each active member
+  // still owes, without a separate query per member (same pattern as the
+  // "Active + Has Due" filter on the Members page).
+  const paymentsByStudent = useMemo(() => {
+    const map = new Map<string, Payment[]>();
+    for (const p of allPayments ?? []) {
+      const arr = map.get(p.studentId);
+      if (arr) arr.push(p);
+      else map.set(p.studentId, [p]);
     }
-    return ids.size;
+    return map;
+  }, [allPayments]);
+
+  // "Active" members for due-calculation purposes: not archived, and their
+  // student_status field is 'active' (the same definition the Members page
+  // uses for "Active + Has Due"). Scoped to the selected academic year's
+  // batches when a year filter is active.
+  const activeMembersForDue = useMemo(() => {
+    let list = (students ?? []).filter(s => String(s.values['student_status'] ?? 'active') === 'active');
+    if (yearBatchIds) {
+      list = list.filter(s => s.batchMemberships.some(m => m.status === 'active' && yearBatchIds.has(m.batchId)));
+    }
+    return list;
   }, [students, yearBatchIds]);
+
+  // Sum of what's still outstanding across all active members — each
+  // member's due is fee_amount + fee_type + fee_frequency weighed against
+  // what they've actually paid (see utils/fees.ts calculateFeeDue).
+  const dueToReceive = useMemo(() => {
+    return activeMembersForDue.reduce((sum, s) => {
+      const { totalDue } = calculateFeeDue(s, paymentsByStudent.get(s.id) ?? []);
+      return sum + totalDue;
+    }, 0);
+  }, [activeMembersForDue, paymentsByStudent]);
 
   // Recent payments for the selected academic year. Derived from the full
   // filtered payment set (sorted by date) rather than filtering the
@@ -392,10 +415,10 @@ export function DashboardPage() {
               document.body
             )}
 
+            <StatCard label="Due to Receive" value={fmt(dueToReceive, currency)}
+              sub="from active members" icon={<Icons.alertCircle size={18} />} onClick={() => navigate('/app/students')} />
             <StatCard label="Active Members" value={String(filteredStats?.studentCount ?? stats?.studentCount ?? 0)}
               sub="in database" icon={<Icons.students size={18} />} onClick={() => navigate('/app/students')} />
-            <StatCard label="Completed Members" value={String(completedMembersCount)}
-              sub={filterYear ? 'completed this year' : 'completed overall'} icon={<Icons.check size={18} />} onClick={() => navigate('/app/students')} />
             <StatCard label="Active Batches" value={String(activeBatches.length)}
               sub="running now" icon={<Icons.batches size={18} />} onClick={() => navigate('/app/batches')} />
           </div>
