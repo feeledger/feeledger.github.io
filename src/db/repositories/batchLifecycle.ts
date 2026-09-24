@@ -2,12 +2,15 @@
  * Batch lifecycle automation.
  *
  * When a batch's end date passes:
- *  1. Every student's ACTIVE membership in that batch is marked 'completed'
+ *  1. The batch itself is marked 'completed'.
+ *  2. Every student's ACTIVE membership in that batch is marked 'completed'
  *     (with leftAt = the batch's end date).
- *  2. If, after that, a student has NO other active batch membership,
- *     their student_status field flips to 'inactive'. This mirrors an
+ *  3. If, after that, a student has NO other active batch membership,
+ *     their student_status field flips to 'completed' too. This mirrors an
  *     archive without actually archiving the record — they remain fully
- *     visible and searchable via the Members list "Inactive" or "All" filter.
+ *     visible and searchable via the Members list "Completed" or "All" filter.
+ *     (A student still active in another batch keeps their overall status
+ *     as-is — only the one membership that ended is marked completed.)
  *
  * This runs automatically once per day (checked on app start) since
  * FeeLedger has no backend/cron — the check happens client-side.
@@ -23,15 +26,17 @@ function todayISODate(): string {
 
 export interface LifecycleResult {
   batchesProcessed: number;
+  batchesCompleted: number;
   membershipsEnded: number;
-  studentsDeactivated: number;
+  studentsCompleted: number;
 }
 
 /**
- * Checks all active batches with a past end date, ends the relevant
- * memberships, and deactivates students left with no active batch.
- * Idempotent and cheap to call — internally skips if already run today.
- * Pass `force: true` to bypass the once-per-day guard (used for manual re-run).
+ * Checks all active batches with a past end date, marks them completed,
+ * ends the relevant memberships, and completes students left with no
+ * active batch. Idempotent and cheap to call — internally skips if already
+ * run today. Pass `force: true` to bypass the once-per-day guard (used for
+ * manual re-run).
  */
 export async function processExpiredBatchMemberships(force = false): Promise<LifecycleResult> {
   const today = todayISODate();
@@ -39,7 +44,7 @@ export async function processExpiredBatchMemberships(force = false): Promise<Lif
   if (!force) {
     const lastRun = localStorage.getItem(LAST_RUN_KEY);
     if (lastRun === today) {
-      return { batchesProcessed: 0, membershipsEnded: 0, studentsDeactivated: 0 };
+      return { batchesProcessed: 0, batchesCompleted: 0, membershipsEnded: 0, studentsCompleted: 0 };
     }
   }
 
@@ -50,7 +55,8 @@ export async function processExpiredBatchMemberships(force = false): Promise<Lif
   );
 
   let membershipsEnded = 0;
-  let studentsDeactivated = 0;
+  let studentsCompleted = 0;
+  let batchesCompleted = 0;
 
   if (expiredBatches.length > 0) {
     const expiredBatchIds = new Set(expiredBatches.map(b => b.id));
@@ -58,7 +64,12 @@ export async function processExpiredBatchMemberships(force = false): Promise<Lif
 
     const allStudents = await db.students.filter(s => !s.archivedAt).toArray();
 
-    await db.transaction('rw', db.students, async () => {
+    await db.transaction('rw', db.students, db.batches, async () => {
+      for (const batch of expiredBatches) {
+        await db.batches.update(batch.id, { status: 'completed', updatedAt: now() });
+        batchesCompleted++;
+      }
+
       for (const student of allStudents) {
         const relevantMemberships = student.batchMemberships.filter(
           m => m.status === 'active' && expiredBatchIds.has(m.batchId)
@@ -78,8 +89,8 @@ export async function processExpiredBatchMemberships(force = false): Promise<Lif
 
         const newValues = { ...student.values };
         if (!stillHasActiveBatch && currentStatus === 'active') {
-          newValues['student_status'] = 'inactive';
-          studentsDeactivated++;
+          newValues['student_status'] = 'completed';
+          studentsCompleted++;
         }
 
         await db.students.put({
@@ -96,13 +107,14 @@ export async function processExpiredBatchMemberships(force = false): Promise<Lif
 
   const result: LifecycleResult = {
     batchesProcessed: expiredBatches.length,
+    batchesCompleted,
     membershipsEnded,
-    studentsDeactivated,
+    studentsCompleted,
   };
 
   // Let the app know something changed, so open UI refreshes and a Drive
   // sync gets queued (mirrors the fl:drive-restored / fl:onboarding-complete pattern).
-  if (membershipsEnded > 0 || studentsDeactivated > 0) {
+  if (membershipsEnded > 0 || studentsCompleted > 0 || batchesCompleted > 0) {
     window.dispatchEvent(new CustomEvent('fl:batch-lifecycle-processed', { detail: result }));
   }
 

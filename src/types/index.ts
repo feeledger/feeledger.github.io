@@ -107,7 +107,7 @@ export interface Batch {
   endDate?: string;
   subjectIds: string[];
   schedule?: string;
-  status: 'active' | 'archived';
+  status: 'active' | 'archived' | 'completed';
   createdAt: string;
   updatedAt: string;
 }

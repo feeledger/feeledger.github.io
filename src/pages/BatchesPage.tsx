@@ -13,12 +13,14 @@ function BatchDetail({
   academicYearName,
   onEdit,
   onArchive,
+  onUnarchive,
 }: {
   batch: Batch;
   subjectNames: string[];
   academicYearName: string;
   onEdit: () => void;
   onArchive: () => void;
+  onUnarchive: () => void;
 }) {
   const { data: members, loading } = useStudentsByBatch(batch.id);
 
@@ -56,10 +58,17 @@ function BatchDetail({
               style={{ fontSize: 13, padding: '8px 14px', borderColor: 'rgba(255,255,255,0.25)', color: 'var(--color-canvas)', background: 'transparent' }}>
               ✏️ Edit
             </button>
-            <button onClick={onArchive}
-              style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.6)', fontFamily: 'var(--font-sans)' }}>
-              Archive
-            </button>
+            {batch.status === 'archived' ? (
+              <button onClick={onUnarchive}
+                style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.6)', fontFamily: 'var(--font-sans)' }}>
+                Unarchive
+              </button>
+            ) : (
+              <button onClick={onArchive}
+                style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.6)', fontFamily: 'var(--font-sans)' }}>
+                Archive
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -201,8 +210,12 @@ function BatchCard({
         </div>
         <span style={{
           fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999,
-          background: batch.status === 'active' ? 'rgba(34,197,94,0.1)' : 'var(--color-bone)',
-          color: batch.status === 'active' ? '#15803d' : 'var(--color-slate)',
+          background: batch.status === 'active' ? 'rgba(34,197,94,0.1)'
+            : batch.status === 'completed' ? 'rgba(56,96,190,0.1)'
+            : 'var(--color-bone)',
+          color: batch.status === 'active' ? '#15803d'
+            : batch.status === 'completed' ? 'var(--color-link)'
+            : 'var(--color-slate)',
         }}>
           {batch.status}
         </span>
@@ -265,8 +278,9 @@ export function BatchesPage() {
     return list;
   }, [batches, filterYear]);
 
-  const activeBatches   = filtered.filter(b => b.status === 'active');
-  const archivedBatches = filtered.filter(b => b.status === 'archived');
+  const activeBatches    = filtered.filter(b => b.status === 'active');
+  const completedBatches = filtered.filter(b => b.status === 'completed');
+  const archivedBatches  = filtered.filter(b => b.status === 'archived');
 
   const handleSaved = (batch: Batch) => {
     refetch();
@@ -289,6 +303,11 @@ export function BatchesPage() {
     }
   };
 
+  const handleUnarchive = async (batch: Batch) => {
+    await batchRepository.unarchive(batch.id);
+    refetch();
+  };
+
   // Detail view
   if (selectedBatch) {
     return (
@@ -305,6 +324,7 @@ export function BatchesPage() {
           academicYearName={getAcademicYearName(selectedBatch.academicYearId)}
           onEdit={() => { setEditingBatch(selectedBatch); setFormOpen(true); }}
           onArchive={() => setArchiveTarget(selectedBatch)}
+          onUnarchive={() => handleUnarchive(selectedBatch)}
         />
 
         {/* Edit form */}
@@ -332,7 +352,7 @@ export function BatchesPage() {
           }
         >
           <p style={{ fontSize: 15, color: 'var(--color-ink)', lineHeight: 1.7 }}>
-            Archive <strong>{archiveTarget?.name}</strong>? Existing member memberships will be preserved. You can unarchive later from Settings.
+            Archive <strong>{archiveTarget?.name}</strong>? Existing member memberships will be preserved. You can unarchive it anytime from this same screen.
           </p>
         </Modal>
       </div>
@@ -390,6 +410,25 @@ export function BatchesPage() {
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: 14 }}>
                 {activeBatches.map(batch => (
+                  <BatchCard
+                    key={batch.id}
+                    batch={batch}
+                    academicYearName={getAcademicYearName(batch.academicYearId)}
+                    subjectNames={getSubjectNames(batch.subjectIds)}
+                    onClick={() => setSelectedId(batch.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {completedBatches.length > 0 && (
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-slate)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14 }}>
+                Completed ({completedBatches.length})
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: 14 }}>
+                {completedBatches.map(batch => (
                   <BatchCard
                     key={batch.id}
                     batch={batch}

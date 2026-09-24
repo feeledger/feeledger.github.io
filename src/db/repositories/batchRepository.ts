@@ -154,6 +154,21 @@ export const batchRepository = {
     await getDB().batches.update(id, { status: 'archived', updatedAt: now() });
   },
 
+  /**
+   * Reverses archive(). If the batch's end date has already passed, it is
+   * restored to 'completed' rather than 'active' — otherwise it would
+   * briefly show as an active batch with a stale end date until the next
+   * daily lifecycle run silently re-completed it.
+   */
+  async unarchive(id: string): Promise<void> {
+    const batch = await getDB().batches.get(id);
+    if (!batch) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const restoredStatus: Batch['status'] =
+      batch.endDate && batch.endDate < today ? 'completed' : 'active';
+    await getDB().batches.update(id, { status: restoredStatus, updatedAt: now() });
+  },
+
   async delete(id: string): Promise<void> {
     await getDB().batches.delete(id);
   },

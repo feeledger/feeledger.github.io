@@ -415,7 +415,7 @@ function SyncTab() {
         showMsg(
           `Processed ${result.batchesProcessed} ended batch${result.batchesProcessed !== 1 ? 'es' : ''} — ` +
           `${result.membershipsEnded} membership${result.membershipsEnded !== 1 ? 's' : ''} ended, ` +
-          `${result.studentsDeactivated} member${result.studentsDeactivated !== 1 ? 's' : ''} marked inactive.`,
+          `${result.studentsCompleted} member${result.studentsCompleted !== 1 ? 's' : ''} marked completed.`,
           'ok'
         );
       }

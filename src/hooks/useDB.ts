@@ -54,6 +54,10 @@ export function useStudents() {
   return useAsync(() => studentRepository.listActive());
 }
 
+export function useAllStudents() {
+  return useAsync(() => studentRepository.listAll());
+}
+
 export function useStudent(id: string | undefined) {
   return useAsync(
     () => id ? studentRepository.getById(id).then(s => s ?? null) : Promise.resolve(null),

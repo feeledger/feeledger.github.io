@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useStudents, useStudentFields, useAllBatches, useSettings, usePayments } from '../hooks/useDB';
+import { useAllStudents, useStudentFields, useAllBatches, useSettings, usePayments } from '../hooks/useDB';
 import { studentRepository } from '../db/repositories/studentRepository';
 import { StudentForm } from '../features/students/StudentForm';
 import { StudentProfile } from '../features/students/StudentProfile';
@@ -107,7 +107,9 @@ function StudentCard({
 type PanelMode = 'list' | 'view' | 'add' | 'edit';
 
 export function StudentsPage() {
-  const { data: students, loading, refetch } = useStudents();
+  const { data: allStudents, loading, refetch } = useAllStudents();
+  const students = useMemo(() => (allStudents ?? []).filter(s => !s.archivedAt), [allStudents]);
+  const archivedStudents = useMemo(() => (allStudents ?? []).filter(s => !!s.archivedAt), [allStudents]);
   const { data: fields } = useStudentFields();
   const { data: batches } = useAllBatches();
   const { data: settings } = useSettings();
@@ -189,8 +191,8 @@ export function StudentsPage() {
   );
 
   const selectedStudent = useMemo(() =>
-    selectedId ? (students ?? []).find(s => s.id === selectedId) : undefined,
-    [selectedId, students]
+    selectedId ? (allStudents ?? []).find(s => s.id === selectedId) : undefined,
+    [selectedId, allStudents]
   );
 
   const handleSaved = (student: Student) => {
@@ -210,6 +212,11 @@ export function StudentsPage() {
     } finally {
       setArchiving(false);
     }
+  };
+
+  const handleRestore = async (student: Student) => {
+    await studentRepository.restore(student.id);
+    refetch();
   };
 
   const activeBatches = (batches ?? []).filter(b => b.status === 'active');
@@ -257,12 +264,21 @@ export function StudentsPage() {
           </button>
           <div style={{ flex: 1 }} />
           {selectedStudent && (
-            <button
-              onClick={() => setArchiveTarget(selectedStudent)}
-              style={{ background: 'none', border: '1px solid var(--color-dust)', borderRadius: 10, padding: '6px 14px', cursor: 'pointer', fontSize: 13, color: 'var(--color-slate)', fontFamily: 'var(--font-sans)' }}
-            >
-              Archive
-            </button>
+            selectedStudent.archivedAt ? (
+              <button
+                onClick={() => handleRestore(selectedStudent)}
+                style={{ background: 'none', border: '1px solid var(--color-dust)', borderRadius: 10, padding: '6px 14px', cursor: 'pointer', fontSize: 13, color: 'var(--color-slate)', fontFamily: 'var(--font-sans)' }}
+              >
+                Restore
+              </button>
+            ) : (
+              <button
+                onClick={() => setArchiveTarget(selectedStudent)}
+                style={{ background: 'none', border: '1px solid var(--color-dust)', borderRadius: 10, padding: '6px 14px', cursor: 'pointer', fontSize: 13, color: 'var(--color-slate)', fontFamily: 'var(--font-sans)' }}
+              >
+                Archive
+              </button>
+            )
           )}
         </div>
         <StudentProfile
@@ -401,6 +417,27 @@ export function StudentsPage() {
         </div>
       )}
 
+      {/* Archived members */}
+      {archivedStudents.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-dust)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14 }}>
+            Archived ({archivedStudents.length})
+          </p>
+          <div style={{ border: '1px solid var(--color-dust)', borderRadius: 16, overflow: 'hidden' }}>
+            {archivedStudents.map(student => (
+              <StudentCard
+                key={student.id}
+                student={student}
+                listFields={listFields}
+                batchNames={getBatchNames(student)}
+                currency={currency}
+                onView={() => { setSelectedId(student.id); setMode('view'); }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Archive confirm modal */}
       <Modal
         open={!!archiveTarget}
@@ -428,7 +465,7 @@ export function StudentsPage() {
       >
         <p style={{ fontSize: 15, color: 'var(--color-ink)', lineHeight: 1.7 }}>
           Archive <strong>{String(archiveTarget?.values['student_name'] ?? 'this member')}</strong>?
-          Their payment history will be preserved. You can restore them from Settings → Data.
+          Their payment history will be preserved. You can restore them anytime from the Archived section on this page.
         </p>
       </Modal>
     </div>
