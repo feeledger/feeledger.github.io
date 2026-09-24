@@ -158,13 +158,24 @@ export function DashboardPage() {
     return new Set((batches ?? []).filter(b => b.academicYearId === filterYear).map(b => b.id));
   }, [batches, filterYear]);
 
-  // Payments belonging to the selected academic year's batches. A payment
-  // with no batch can't be attributed to a specific year, so it's excluded
-  // once a year is picked (it still counts under "All years").
+  // Payments belonging to the selected academic year's batches. Precise when
+  // a payment carries its own batchId; for older/legacy payments that were
+  // saved without one (e.g. recorded before the member had a batch, or the
+  // batch selector only appears for members in more than one batch), fall
+  // back to the paying member's own current active-batch year — the same
+  // membership test "Active Members" already uses — so those payments still
+  // show up under the year the member actually belongs to.
   const yearFilteredPayments = useMemo(() => {
     if (!yearBatchIds) return null;
-    return (allPayments ?? []).filter(p => p.batchId && yearBatchIds.has(p.batchId));
-  }, [allPayments, yearBatchIds]);
+    const memberIdsInYear = new Set(
+      (students ?? [])
+        .filter(s => s.batchMemberships.some(m => m.status === 'active' && yearBatchIds.has(m.batchId)))
+        .map(s => s.id)
+    );
+    return (allPayments ?? []).filter(p =>
+      p.batchId ? yearBatchIds.has(p.batchId) : memberIdsInYear.has(p.studentId)
+    );
+  }, [allPayments, yearBatchIds, students]);
 
   // Recomputed KPI stats for the selected academic year. null when "All
   // years" is selected, in which case the cards fall back to `stats` from
@@ -198,6 +209,20 @@ export function DashboardPage() {
       studentCount: memberIds.size,
     };
   }, [yearFilteredPayments, yearBatchIds, students, stats?.ytdStartDate]);
+
+  // Members with a "completed" batch membership — scoped to the selected
+  // academic year's batches, or across every batch under "All years".
+  const completedMembersCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of students ?? []) {
+      if (s.batchMemberships.some(m =>
+        m.status === 'completed' && (!yearBatchIds || yearBatchIds.has(m.batchId))
+      )) {
+        ids.add(s.id);
+      }
+    }
+    return ids.size;
+  }, [students, yearBatchIds]);
 
   // Recent payments for the selected academic year. Derived from the full
   // filtered payment set (sorted by date) rather than filtering the
@@ -291,10 +316,6 @@ export function DashboardPage() {
         <>
           {/* Stat cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%,155px),1fr))', gap: 12, marginBottom: 20 }}>
-            <StatCard label="Total Collection" value={fmt(filteredStats?.totalCollection ?? stats?.totalCollection ?? 0, currency)}
-              sub={`${filteredStats?.paymentCount ?? stats?.paymentCount ?? 0} payments`} accent
-              icon={<Icons.rupee size={18} />} onClick={() => navigate('/app/payments')} />
-
             {/* YTD card — editable start date */}
             <div className="dashboard-stat" style={{ position: 'relative', cursor: 'default' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
@@ -373,6 +394,8 @@ export function DashboardPage() {
 
             <StatCard label="Active Members" value={String(filteredStats?.studentCount ?? stats?.studentCount ?? 0)}
               sub="in database" icon={<Icons.students size={18} />} onClick={() => navigate('/app/students')} />
+            <StatCard label="Completed Members" value={String(completedMembersCount)}
+              sub={filterYear ? 'completed this year' : 'completed overall'} icon={<Icons.check size={18} />} onClick={() => navigate('/app/students')} />
             <StatCard label="Active Batches" value={String(activeBatches.length)}
               sub="running now" icon={<Icons.batches size={18} />} onClick={() => navigate('/app/batches')} />
           </div>
