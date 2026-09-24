@@ -2,7 +2,7 @@ import { useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
-  useDashboardStats, useRecentPayments,
+  useDashboardStats, useRecentPayments, usePayments,
   useStudents, useAllBatches, useSettings, useAcademicYears,
 } from '../hooks/useDB';
 import { SyncStatusBar } from '../components/SyncStatusBar';
@@ -101,6 +101,10 @@ export function DashboardPage() {
   const { data: students                          } = useStudents();
   const { data: batches                           } = useAllBatches();
   const { data: academicYears                     } = useAcademicYears();
+  // Full payment set — only used to recompute the KPI cards below when an
+  // academic year filter is active; the unfiltered view keeps using `stats`
+  // from useDashboardStats() exactly as before.
+  const { data: allPayments                       } = usePayments();
 
   const [filterYear, setFilterYear] = useState('');
   const [editingYtd, setEditingYtd] = useState(false);
@@ -148,12 +152,63 @@ export function DashboardPage() {
     }).sort((a, b) => b.memberCount - a.memberCount);
   }, [batches, students, filterYear]);
 
-  // Filter recent payments by academic year
+  // Batch IDs belonging to the selected academic year (null when "All years").
+  const yearBatchIds = useMemo(() => {
+    if (!filterYear) return null;
+    return new Set((batches ?? []).filter(b => b.academicYearId === filterYear).map(b => b.id));
+  }, [batches, filterYear]);
+
+  // Payments belonging to the selected academic year's batches. A payment
+  // with no batch can't be attributed to a specific year, so it's excluded
+  // once a year is picked (it still counts under "All years").
+  const yearFilteredPayments = useMemo(() => {
+    if (!yearBatchIds) return null;
+    return (allPayments ?? []).filter(p => p.batchId && yearBatchIds.has(p.batchId));
+  }, [allPayments, yearBatchIds]);
+
+  // Recomputed KPI stats for the selected academic year. null when "All
+  // years" is selected, in which case the cards fall back to `stats` from
+  // useDashboardStats() unchanged.
+  const filteredStats = useMemo(() => {
+    if (!yearFilteredPayments || !yearBatchIds) return null;
+
+    const totalCollection = yearFilteredPayments.reduce((sum, p) => sum + p.amount, 0);
+    const paymentCount = yearFilteredPayments.length;
+
+    const ytdStartDate = stats?.ytdStartDate ?? '';
+    const ytdCollection = yearFilteredPayments
+      .filter(p => p.paymentDate >= ytdStartDate)
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    const collectionByMode: Record<string, number> = {};
+    for (const p of yearFilteredPayments) {
+      collectionByMode[p.paymentMode] = (collectionByMode[p.paymentMode] ?? 0) + p.amount;
+    }
+
+    // Active members with an active membership in any batch under this year.
+    const memberIds = new Set<string>();
+    for (const s of students ?? []) {
+      if (s.batchMemberships.some(m => m.status === 'active' && yearBatchIds.has(m.batchId))) {
+        memberIds.add(s.id);
+      }
+    }
+
+    return {
+      totalCollection, paymentCount, ytdCollection, collectionByMode,
+      studentCount: memberIds.size,
+    };
+  }, [yearFilteredPayments, yearBatchIds, students, stats?.ytdStartDate]);
+
+  // Recent payments for the selected academic year. Derived from the full
+  // filtered payment set (sorted by date) rather than filtering the
+  // already-limited "recent 8", so older batches still show their most
+  // recent payments instead of coming up empty.
   const filteredRecent = useMemo(() => {
-    if (!filterYear || !batches) return recent ?? [];
-    const batchIds = new Set(batches.filter(b => b.academicYearId === filterYear).map(b => b.id));
-    return (recent ?? []).filter(p => !p.batchId || batchIds.has(p.batchId));
-  }, [recent, filterYear, batches]);
+    if (!yearFilteredPayments) return recent ?? [];
+    return [...yearFilteredPayments]
+      .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate))
+      .slice(0, 8);
+  }, [yearFilteredPayments, recent]);
 
   const studentName = (id: string) =>
     String(students?.find(s => s.id === id)?.values['student_name'] ?? 'Unknown');
@@ -236,8 +291,8 @@ export function DashboardPage() {
         <>
           {/* Stat cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%,155px),1fr))', gap: 12, marginBottom: 20 }}>
-            <StatCard label="Total Collection" value={fmt(stats?.totalCollection ?? 0, currency)}
-              sub={`${stats?.paymentCount ?? 0} payments`} accent
+            <StatCard label="Total Collection" value={fmt(filteredStats?.totalCollection ?? stats?.totalCollection ?? 0, currency)}
+              sub={`${filteredStats?.paymentCount ?? stats?.paymentCount ?? 0} payments`} accent
               icon={<Icons.rupee size={18} />} onClick={() => navigate('/app/payments')} />
 
             {/* YTD card — editable start date */}
@@ -256,7 +311,7 @@ export function DashboardPage() {
                 </button>
               </div>
               <p style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--color-ink)' }}>
-                {fmt(stats?.ytdCollection ?? 0, currency)}
+                {fmt(filteredStats?.ytdCollection ?? stats?.ytdCollection ?? 0, currency)}
               </p>
               <p style={{ fontSize: 12, marginTop: 6, color: 'var(--color-slate)' }}>{ytdLabel}</p>
             </div>
@@ -316,7 +371,7 @@ export function DashboardPage() {
               document.body
             )}
 
-            <StatCard label="Active Members" value={String(stats?.studentCount ?? 0)}
+            <StatCard label="Active Members" value={String(filteredStats?.studentCount ?? stats?.studentCount ?? 0)}
               sub="in database" icon={<Icons.students size={18} />} onClick={() => navigate('/app/students')} />
             <StatCard label="Active Batches" value={String(activeBatches.length)}
               sub="running now" icon={<Icons.batches size={18} />} onClick={() => navigate('/app/batches')} />
@@ -377,7 +432,11 @@ export function DashboardPage() {
               <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-slate)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>
                 By Payment Mode
               </p>
-              <ModeBreakdown data={stats?.collectionByMode ?? {}} total={stats?.totalCollection ?? 0} currency={currency} />
+              <ModeBreakdown
+                data={filteredStats?.collectionByMode ?? stats?.collectionByMode ?? {}}
+                total={filteredStats?.totalCollection ?? stats?.totalCollection ?? 0}
+                currency={currency}
+              />
             </div>
 
             {/* Active batches */}

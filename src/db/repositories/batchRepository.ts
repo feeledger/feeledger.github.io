@@ -18,6 +18,14 @@ export const academicYearRepository = {
       updatedAt: ts,
     };
     await db.academicYears.add(year);
+
+    // Let every mounted useAcademicYears() (and other useAsync-backed)
+    // instance across the app know a new year exists — e.g. the Dashboard's
+    // filter pills, or a different BatchForm's dropdown — so they refresh
+    // immediately instead of staying stale until that component remounts.
+    // Mirrors the fl:drive-restored / fl:batch-lifecycle-processed pattern.
+    window.dispatchEvent(new CustomEvent('fl:academic-year-created', { detail: year }));
+
     return year;
   },
 

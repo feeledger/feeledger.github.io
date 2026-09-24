@@ -26,9 +26,11 @@ function useAsync<T>(
     const handler = () => setTick(t => t + 1);
     window.addEventListener('fl:drive-restored', handler);
     window.addEventListener('fl:batch-lifecycle-processed', handler);
+    window.addEventListener('fl:academic-year-created', handler);
     return () => {
       window.removeEventListener('fl:drive-restored', handler);
       window.removeEventListener('fl:batch-lifecycle-processed', handler);
+      window.removeEventListener('fl:academic-year-created', handler);
     };
   }, []);
 
