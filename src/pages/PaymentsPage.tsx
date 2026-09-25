@@ -3,11 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { usePayments, useStudents, useAllBatches, useSettings, useStudentFields } from '../hooks/useDB';
 import { paymentRepository } from '../db/repositories/paymentRepository';
 import { ReceivePaymentForm, type PaymentResult } from '../features/payments/ReceivePaymentForm';
-import { ReceiptViewer } from '../features/receipts/ReceiptViewer';
 import { PageHeader, EmptyState, Spinner, Modal, Badge } from '../components/ui/index';
 import { useSync } from '../services/SyncContext';
 import type { Payment } from '../types';
-import type { ReceiptData } from '../services/pdf/receiptPDF';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -26,14 +24,16 @@ function formatDate(iso: string) {
 
 function PaymentSuccess({
   result,
+  sharing,
   onDone,
   onNewPayment,
-  onViewReceipt,
+  onShareReceipt,
 }: {
   result: PaymentResult;
+  sharing: boolean;
   onDone: () => void;
   onNewPayment: () => void;
-  onViewReceipt: () => void;
+  onShareReceipt: () => void;
 }) {
   const currency = 'INR';
   const studentName = String(result.student.values['student_name'] ?? 'Member');
@@ -96,8 +96,9 @@ function PaymentSuccess({
         <button className="btn-secondary" onClick={onNewPayment} style={{ fontSize: 14, padding: '11px 22px' }}>
           + New Payment
         </button>
-        <button className="btn-secondary" onClick={onViewReceipt} style={{ fontSize: 14, padding: '11px 22px' }}>
-          🧾 View Receipt
+        <button className="btn-secondary" onClick={onShareReceipt} disabled={sharing}
+          style={{ fontSize: 14, padding: '11px 22px', opacity: sharing ? 0.75 : 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+          {sharing ? 'Preparing…' : <>💬 Share Receipt</>}
         </button>
         <button className="btn-primary" onClick={onDone} style={{ fontSize: 14, padding: '11px 28px' }}>
           Done
@@ -183,7 +184,7 @@ export function PaymentsPage() {
     searchParams.get('action') === 'receive' ? 'receive' : 'list'
   );
   const [successResult, setSuccessResult] = useState<PaymentResult | null>(null);
-  const [viewerData, setViewerData] = useState<ReceiptData | null>(null);
+  const [sharingReceipt, setSharingReceipt] = useState(false);
 
   // Filters
   const [filterMode, setFilterMode]   = useState('');
@@ -228,18 +229,27 @@ export function PaymentsPage() {
     syncPush().catch(console.error);
   };
 
-  const handleViewReceipt = async (result: PaymentResult) => {
-    if (!settings || !fields) return;
-    setViewerData({
-      receipt: result.receipt,
-      payment: result.payment,
-      student: result.student,
-      settings,
-      fields,
-      batchName: result.payment.batchId
-        ? (batches?.find(b => b.id === result.payment.batchId)?.name ?? '')
-        : '',
-    });
+  const handleShareReceipt = async (result: PaymentResult) => {
+    if (!settings || !fields || sharingReceipt) return;
+    setSharingReceipt(true);
+    try {
+      const { shareReceiptOnWhatsApp } = await import('../services/receiptShare');
+      await shareReceiptOnWhatsApp({
+        receipt: result.receipt,
+        payment: result.payment,
+        student: result.student,
+        settings,
+        fields,
+        batchName: result.payment.batchId
+          ? (batches?.find(b => b.id === result.payment.batchId)?.name ?? '')
+          : '',
+      });
+    } catch (err) {
+      console.error('Share receipt error:', err);
+      alert('Failed to share the receipt. Please try again.');
+    } finally {
+      setSharingReceipt(false);
+    }
   };
 
   const handleArchive = async () => {
@@ -278,9 +288,10 @@ export function PaymentsPage() {
         <div style={{ background: 'var(--color-white)', border: '1px solid var(--color-dust)', borderRadius: 24, padding: 'clamp(20px,4vw,32px)' }}>
           <PaymentSuccess
             result={successResult}
+            sharing={sharingReceipt}
             onDone={() => { setSuccessResult(null); setMode('list'); }}
             onNewPayment={() => { setSuccessResult(null); setMode('receive'); }}
-            onViewReceipt={() => successResult && handleViewReceipt(successResult)}
+            onShareReceipt={() => handleShareReceipt(successResult)}
           />
         </div>
       </div>
@@ -387,13 +398,6 @@ export function PaymentsPage() {
           ))}
         </div>
       )}
-
-      {/* Receipt viewer */}
-      <ReceiptViewer
-        open={!!viewerData}
-        data={viewerData}
-        onClose={() => setViewerData(null)}
-      />
 
       {/* Archive confirm modal */}
       <Modal
